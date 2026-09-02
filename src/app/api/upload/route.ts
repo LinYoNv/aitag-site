@@ -8,7 +8,7 @@ import type { Work } from "@/lib/types";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const UPLOAD_DIR = path.join(process.cwd(), "public", "images", "uploads");
+const UPLOAD_DIR = path.join(process.cwd(), "data", "uploads");
 const MAX_SIZE = 20 * 1024 * 1024; // 20MB 单张
 
 function isImage(bytes: Buffer): { ok: boolean; ext: string } {
@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
       fs.writeFileSync(path.join(UPLOAD_DIR, filename), bytes);
 
       const meta = parseMeta(String(form.get(`meta_${i}`) ?? ""));
-      saved.push({ url: `/images/uploads/${filename}`, meta });
+      saved.push({ url: `/api/images/${filename}`, meta });
     }
 
     const ai_type = (["sd", "nai", "nai_x", "comfyui", "other"].includes(aiType)

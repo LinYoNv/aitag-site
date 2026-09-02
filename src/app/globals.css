@@ -170,3 +170,38 @@ a {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* ===== 详情页多图 Grid（参照 aitag.win）===== */
+.detail-images {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 1200px) {
+  .detail-images {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 800px) {
+  .detail-images {
+    grid-template-columns: 1fr;
+  }
+}
+
+.detail-images .img-card {
+  background: #0f1217;
+  border: 1px solid #262b36;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.detail-images .img-card > img {
+  width: 100%;
+  display: block;
+  max-height: 70vh;
+  object-fit: contain;
+  background: #000;
+}
