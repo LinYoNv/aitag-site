@@ -2,9 +2,16 @@
 
 import { useEffect, useState, useCallback } from "react";
 import GalleryCard from "@/components/GalleryCard";
+import UserBadge from "@/components/UserBadge";
 import type { PagedWorks } from "@/lib/types";
 
-export default function GalleryPage() {
+interface UserInfo {
+  username: string;
+  role: string;
+  author_name: string;
+}
+
+export default function GalleryPage({ user }: { user: UserInfo }) {
   const [q, setQ] = useState("");
   const [input, setInput] = useState("");
   const [sort, setSort] = useState<"new" | "monthly">("new");
@@ -81,6 +88,7 @@ export default function GalleryPage() {
         >
           + 上传
         </a>
+        <UserBadge username={user.username} isAdmin={user.role === "admin"} />
       </header>
 
       <main className="py-4">

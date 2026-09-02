@@ -34,6 +34,22 @@ export function getDb(): DatabaseSync {
       );
       CREATE INDEX IF NOT EXISTS idx_works_create_date ON works(create_date DESC);
       CREATE INDEX IF NOT EXISTS idx_works_ai_type ON works(ai_type);
+
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'user',   -- 'admin' | 'user'
+        author_name TEXT NOT NULL DEFAULT '',
+        create_date TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        create_date TEXT NOT NULL,
+        expire_date TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
     `);
   }
   return db;
@@ -197,4 +213,91 @@ export function getMonthlyRank(limit = 20): WorkListItem[] {
       cover: w.images[0] ?? "",
     };
   });
+}
+
+// ===== 用户 & 会话 =====
+
+export interface UserRow {
+  id: string;
+  username: string;
+  password_hash: string;
+  role: "admin" | "user";
+  author_name: string;
+  create_date: string;
+}
+
+export function createUser(user: {
+  id: string;
+  username: string;
+  password_hash: string;
+  role?: "admin" | "user";
+  author_name?: string;
+}): void {
+  const d = getDb();
+  d.prepare(
+    `INSERT OR IGNORE INTO users (id, username, password_hash, role, author_name, create_date)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(
+    user.id,
+    user.username,
+    user.password_hash,
+    user.role ?? "user",
+    user.author_name || user.username,
+    new Date().toISOString(),
+  );
+}
+
+export function getUserByUsername(username: string): UserRow | null {
+  const d = getDb();
+  const row = d.prepare("SELECT * FROM users WHERE username = ?").get(username) as
+    | Record<string, unknown>
+    | undefined;
+  return row ? (row as unknown as UserRow) : null;
+}
+
+export function getUserById(id: string): UserRow | null {
+  const d = getDb();
+  const row = d.prepare("SELECT * FROM users WHERE id = ?").get(id) as
+    | Record<string, unknown>
+    | undefined;
+  return row ? (row as unknown as UserRow) : null;
+}
+
+export function createSession(token: string, userId: string, ttlMs: number): void {
+  const d = getDb();
+  const now = Date.now();
+  d.prepare(
+    `INSERT INTO sessions (token, user_id, create_date, expire_date) VALUES (?, ?, ?, ?)`,
+  ).run(token, userId, new Date(now).toISOString(), new Date(now + ttlMs).toISOString());
+}
+
+export function getSessionUser(token: string): UserRow | null {
+  const d = getDb();
+  const row = d
+    .prepare(
+      `SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
+       WHERE s.token = ? AND s.expire_date > ?`,
+    )
+    .get(token, new Date().toISOString()) as Record<string, unknown> | undefined;
+  return row ? (row as unknown as UserRow) : null;
+}
+
+export function deleteSession(token: string): void {
+  const d = getDb();
+  d.prepare("DELETE FROM sessions WHERE token = ?").run(token);
+}
+
+export function deleteWorkById(id: string): { deleted: boolean; authorName: string } {
+  const d = getDb();
+  const work = d.prepare("SELECT author_name FROM works WHERE id = ?").get(id) as
+    | { author_name: string }
+    | undefined;
+  if (!work) return { deleted: false, authorName: "" };
+  const res = d.prepare("DELETE FROM works WHERE id = ?").run(id);
+  return { deleted: Number(res.changes) > 0, authorName: work.author_name };
+}
+
+export function workExists(id: string): boolean {
+  const d = getDb();
+  return !!d.prepare("SELECT 1 FROM works WHERE id = ?").get(id);
 }

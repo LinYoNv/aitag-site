@@ -1,15 +1,43 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import type { Work } from "@/lib/types";
 import { typeLabel, typeClass, formatDate } from "@/lib/format";
 import { getPerImageMetas } from "@/lib/types";
 import CardMetaView from "@/components/CardMetaView";
 
-export default function WorkDetailClient({ work }: { work: Work }) {
+interface Props {
+  work: Work;
+  canDelete?: boolean;
+  isAdmin?: boolean;
+}
+
+export default function WorkDetailClient({ work, canDelete, isAdmin }: Props) {
+  const [deleting, setDeleting] = useState(false);
+  const [deleteMsg, setDeleteMsg] = useState("");
   const perImages = getPerImageMetas(work.metadata);
   const images = work.images.length > 0 ? work.images : [];
   const multi = images.length > 1;
+
+  async function handleDelete() {
+    if (!window.confirm("确定删除这个作品吗？此操作不可恢复。")) return;
+    setDeleting(true);
+    setDeleteMsg("");
+    try {
+      const res = await fetch(`/api/works/${work.id}`, { method: "DELETE" });
+      const data = (await res.json()) as { ok?: boolean; error?: string };
+      if (res.ok && data.ok) {
+        window.location.href = "/";
+      } else {
+        setDeleteMsg(data.error ?? "删除失败");
+        setDeleting(false);
+      }
+    } catch {
+      setDeleteMsg("网络错误");
+      setDeleting(false);
+    }
+  }
 
   // 计算每张图对应的参数：
   // - 多图（metadata.per_image 结构）→ per_image[i]
@@ -34,6 +62,25 @@ export default function WorkDetailClient({ work }: { work: Work }) {
         <span className="text-sm text-[#aeb6c2] truncate">
           作品 {work.id}
         </span>
+        {isAdmin && (
+          <span className="text-[11px] px-2 py-0.5 rounded bg-[#3a2a1a] text-[#ffb45a] border border-[#5a4a2a] shrink-0">
+            管理员
+          </span>
+        )}
+        {canDelete && (
+          <>
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="ml-auto text-sm px-4 py-1.5 rounded-lg bg-[#2a1a1a] border border-[#5a2a2a] text-[#ff7a7a] hover:bg-[#3a1a1a] disabled:opacity-50 shrink-0"
+            >
+              {deleting ? "删除中…" : "删除作品"}
+            </button>
+            {deleteMsg && (
+              <span className="text-xs text-[#ff7a7a]">{deleteMsg}</span>
+            )}
+          </>
+        )}
       </header>
 
       <main className="max-w-6xl mx-auto px-6 py-6">

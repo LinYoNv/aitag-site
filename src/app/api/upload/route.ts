@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { insertWork } from "@/lib/db";
+import { currentUser } from "@/lib/auth";
 import type { Work } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -35,12 +36,17 @@ function parseMeta(raw: string | null): Record<string, unknown> | null {
 
 export async function POST(req: NextRequest) {
   try {
+    // 必须登录才能上传，作者绑定登录账号
+    const user = await currentUser();
+    if (!user) {
+      return NextResponse.json({ error: "请先登录" }, { status: 401 });
+    }
     const form = await req.formData();
 
     const title = String(form.get("title") ?? "").slice(0, 200);
     const caption = String(form.get("caption") ?? "").slice(0, 500);
     const aiType = String(form.get("ai_type") ?? "nai");
-    const authorName = String(form.get("author_name") ?? "群友").slice(0, 50);
+    const authorName = user.username; // 作者 = 登录用户名
     const shareTitle = String(form.get("share_title") ?? "") === "1";
 
     // 收集所有文件
