@@ -92,11 +92,37 @@ export default function UploadPage() {
         form.append("files", entry.file);
         let meta: Record<string, unknown> | null = null;
         if (tab === "png") {
+          // 平铺 NovelAI comment 里的完整参数到顶层，供详情页展示
+          const rawMeta = entry.parseResult?.metadata as
+            | (Record<string, unknown> & { comment?: Record<string, unknown> })
+            | undefined;
+          const comment = rawMeta?.comment;
           meta = {
             prompt: entry.prompt,
             uc: entry.negative,
-            ...(entry.parseResult?.metadata ?? {}),
+            ...(rawMeta ?? {}),
+            // comment 内的关键生成参数平铺到顶层（与种子数据一致）
+            ...(comment && typeof comment === "object"
+              ? {
+                  sampler: comment.sampler,
+                  steps: comment.steps,
+                  width: comment.width,
+                  height: comment.height,
+                  scale: comment.scale,
+                  seed: comment.seed,
+                  noise_schedule: comment.noise_schedule,
+                  sm: comment.sm,
+                  sm_dyn: comment.sm_dyn,
+                  dynamic_thresholding: comment.dynamic_thresholding,
+                  cfg_rescale: comment.cfg_rescale,
+                  uncond_scale: comment.uncond_scale,
+                  version: comment.version,
+                  request_type: comment.request_type,
+                }
+              : {}),
           };
+          // 保留 comment 本身（JSON 视图可用）
+          meta.comment = comment ?? null;
         } else {
           meta = { prompt: manualPrompt || null, uc: manualNegative || null };
         }
