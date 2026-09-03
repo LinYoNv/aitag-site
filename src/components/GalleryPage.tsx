@@ -47,12 +47,12 @@ export default function GalleryPage({ user }: { user: UserInfo }) {
   return (
     <div className="min-h-screen">
       {/* header */}
-      <header className="sticky top-0 z-40 backdrop-blur bg-[#0b0d10]/90 border-b border-[#262b36] px-6 py-3 flex items-center gap-4">
-        <h1 className="text-lg font-bold text-[#e6edf3] whitespace-nowrap">
+      <header className="sticky top-0 z-40 backdrop-blur bg-[#0b0d10]/90 border-b border-[#262b36] px-4 sm:px-6 py-2 sm:py-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <h1 className="text-base sm:text-lg font-bold text-[#e6edf3] whitespace-nowrap">
           AI 咒语图库
         </h1>
         <form
-          className="flex-1 flex gap-2 max-w-xl"
+          className="flex-1 flex gap-2 max-w-xl max-sm:order-[100] max-sm:basis-full"
           onSubmit={(e) => {
             e.preventDefault();
             setQ(input.trim());
@@ -63,7 +63,7 @@ export default function GalleryPage({ user }: { user: UserInfo }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="搜索 作品ID/作者/标签/参数…"
-            className="flex-1 bg-[#151922] border border-[#262b36] rounded-lg px-3 py-1.5 text-sm text-[#e6edf3] placeholder-[#5a6270] outline-none focus:border-[#4c9fff]"
+            className="flex-1 min-w-0 bg-[#151922] border border-[#262b36] rounded-lg px-3 py-1.5 text-sm text-[#e6edf3] placeholder-[#5a6270] outline-none focus:border-[#4c9fff]"
           />
           <button
             type="submit"
@@ -78,14 +78,14 @@ export default function GalleryPage({ user }: { user: UserInfo }) {
             setSort(e.target.value as "new" | "monthly");
             setPage(1);
           }}
-          className="bg-[#151922] border border-[#262b36] rounded-lg px-2 py-1.5 text-sm text-[#e6edf3]"
+          className="bg-[#151922] border border-[#262b36] rounded-lg px-2 py-1.5 text-sm text-[#e6edf3] max-sm:text-xs"
         >
           <option value="new">最新</option>
           <option value="monthly">月榜</option>
         </select>
         <a
           href="/upload"
-          className="bg-[#151922] border border-[#262b36] text-[#e6edf3] text-sm px-4 py-1.5 rounded-lg hover:border-[#4c9fff] whitespace-nowrap"
+          className="bg-[#151922] border border-[#262b36] text-[#e6edf3] text-sm max-sm:text-xs px-3 sm:px-4 py-1.5 rounded-lg hover:border-[#4c9fff] whitespace-nowrap"
         >
           + 上传
         </a>

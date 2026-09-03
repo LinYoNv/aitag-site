@@ -39,7 +39,7 @@ export default function LoginPage() {
     >
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-sm mx-4 bg-[#151922] border border-[#262b36] rounded-2xl p-8"
+        className="w-full max-w-sm mx-4 bg-[#151922] border border-[#262b36] rounded-2xl p-6 sm:p-8"
       >
         <h1 className="text-xl font-bold text-[#e6edf3] mb-1 text-center">
           AI 咒语图库

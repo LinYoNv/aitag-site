@@ -41,7 +41,7 @@ export default function RegisterForm() {
   if (done) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: "#0b0d10" }}>
-        <div className="w-full max-w-sm mx-4 bg-[#151922] border border-[#262b36] rounded-2xl p-8 text-center">
+        <div className="w-full max-w-sm mx-4 bg-[#151922] border border-[#262b36] rounded-2xl p-6 sm:p-8 text-center">
           <div className="text-4xl mb-3">✅</div>
           <h1 className="text-lg font-bold text-[#e6edf3] mb-2">注册成功</h1>
           <p className="text-sm text-[#aeb6c2] mb-6">
@@ -65,7 +65,7 @@ export default function RegisterForm() {
     >
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-sm mx-4 bg-[#151922] border border-[#262b36] rounded-2xl p-8"
+        className="w-full max-w-sm mx-4 bg-[#151922] border border-[#262b36] rounded-2xl p-6 sm:p-8"
       >
         <h1 className="text-xl font-bold text-[#e6edf3] mb-1 text-center">
           注册账号

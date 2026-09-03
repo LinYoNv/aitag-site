@@ -511,14 +511,14 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-40 backdrop-blur bg-[#0b0d10]/90 border-b border-[#262b36] px-6 py-3 flex items-center gap-4">
+      <header className="sticky top-0 z-40 backdrop-blur bg-[#0b0d10]/90 border-b border-[#262b36] px-4 sm:px-6 py-2 sm:py-3 flex items-center gap-4">
         <Link
           href="/"
-          className="text-lg font-bold text-[#e6edf3] hover:text-[#4c9fff] whitespace-nowrap"
+          className="text-base sm:text-lg font-bold text-[#e6edf3] hover:text-[#4c9fff] whitespace-nowrap"
         >
           ← AI 咒语图库
         </Link>
-        <span className="text-sm text-[#aeb6c2]">上传作品</span>
+        <span className="text-sm text-[#aeb6c2] truncate">上传作品</span>
         <div className="ml-auto">
           <UserBadge
             username={user.username}
@@ -528,11 +528,11 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-6 py-6">
-        <h1 className="text-xl font-bold text-[#e6edf3] mb-5">上传作品</h1>
+      <main className="max-w-3xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
+        <h1 className="text-lg sm:text-xl font-bold text-[#e6edf3] mb-4 sm:mb-5">上传作品</h1>
 
         {/* 三种上传方式卡片 */}
-        <div className="grid grid-cols-3 gap-3 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
           {/* NAI */}
           <button
             onClick={() => switchMode("nai")}
@@ -614,7 +614,7 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
             setDragging(false);
             handleFiles(e.dataTransfer.files);
           }}
-          className={`border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all ${
+          className={`border-2 border-dashed rounded-2xl p-6 sm:p-10 text-center cursor-pointer transition-all ${
             dragging
               ? "border-[#4c9fff] bg-[#1a2233] scale-[1.01]"
               : "border-[#2a3242] bg-gradient-to-b from-[#131722] to-[#0f1218] hover:border-[#4c9fff] hover:from-[#151b29] hover:to-[#10131a]"
@@ -701,7 +701,7 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
 
         {/* 表单 */}
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-sm text-[#e6edf3] mb-1">
                 标题{entries.length > 1 && shareTitle ? "（共用）" : ""}

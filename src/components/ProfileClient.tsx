@@ -58,8 +58,8 @@ export default function ProfileClient({ user }: Props) {
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-40 backdrop-blur bg-[#0b0d10]/90 border-b border-[#262b36] px-6 py-3 flex items-center gap-4">
-        <Link href="/" className="text-lg font-bold text-[#e6edf3] whitespace-nowrap hover:text-[#4c9fff]">
+      <header className="sticky top-0 z-40 backdrop-blur bg-[#0b0d10]/90 border-b border-[#262b36] px-4 sm:px-6 py-2 sm:py-3 flex items-center gap-4">
+        <Link href="/" className="text-base sm:text-lg font-bold text-[#e6edf3] whitespace-nowrap hover:text-[#4c9fff]">
           AI 咒语图库
         </Link>
         <span className="text-sm text-[#aeb6c2]">个人资料</span>
@@ -72,8 +72,8 @@ export default function ProfileClient({ user }: Props) {
         </div>
       </header>
 
-      <main className="max-w-xl mx-auto px-6 py-10">
-        <div className="bg-[#151922] border border-[#262b36] rounded-2xl p-8">
+      <main className="max-w-xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
+        <div className="bg-[#151922] border border-[#262b36] rounded-2xl p-5 sm:p-8">
           {/* 头像 */}
           <div className="flex flex-col items-center mb-6">
             <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-[#262b36] mb-3">
