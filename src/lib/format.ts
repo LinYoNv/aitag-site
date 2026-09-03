@@ -2,10 +2,10 @@ import type { AiType } from "@/lib/types";
 
 const TYPE_LABELS: Record<AiType, string> = {
   sd: "SD",
-  nai: "NAI",
+  nai: "NovelAI",
   nai_x: "NAI-X",
   comfyui: "ComfyUI",
-  other: "AI",
+  other: "自定义",
 };
 
 export function typeLabel(t: AiType): string {

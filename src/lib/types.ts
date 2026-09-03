@@ -2,6 +2,7 @@
 
 export type AiType = "sd" | "nai" | "nai_x" | "comfyui" | "other";
 
+// ---- NovelAI 参数 ----
 export interface NovelAiMetadata {
   prompt: string;
   negativePrompt: string;
@@ -13,6 +14,26 @@ export interface NovelAiMetadata {
   seed: number;
   noiseSchedule: string;
   model: string;
+  [key: string]: unknown;
+}
+
+// ---- ComfyUI 参数（从 workflow JSON 抽取的可读字段）----
+export interface ComfyUiMetadata {
+  prompt: string;
+  negativePrompt: string;
+  /** 底模 / checkpoint 名称 */
+  model: string;
+  /** LoRA 列表（名称，可能有多个） */
+  loras: string[];
+  sampler: string;
+  scheduler: string;
+  steps: number;
+  cfg: number;
+  seed: number;
+  width: number;
+  height: number;
+  /** 原始 workflow JSON 文本（保留供 JSON 视图） */
+  rawJson?: string;
   [key: string]: unknown;
 }
 
@@ -83,6 +104,7 @@ export interface PngParseResult {
   error?: string;
   metadata?: Record<string, unknown>;
   novelai?: NovelAiMetadata;
+  comfyui?: ComfyUiMetadata;
   width?: number;
   height?: number;
 }

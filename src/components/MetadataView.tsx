@@ -28,6 +28,21 @@ const NAI_ORDER: Array<[string, string]> = [
   ["request_type", "Request Type"],
 ];
 
+// ComfyUI 参数的可读字段顺序
+const COMFY_ORDER: Array<[string, string]> = [
+  ["prompt", "Prompt"],
+  ["uc", "Negative Prompt"],
+  ["model", "Model 底模"],
+  ["loras", "LoRA"],
+  ["sampler", "Sampler"],
+  ["scheduler", "Scheduler"],
+  ["steps", "Steps"],
+  ["cfg", "CFG"],
+  ["seed", "Seed"],
+  ["width", "Width"],
+  ["height", "Height"],
+];
+
 function JsonView({ data }: { data: Record<string, unknown> }) {
   return (
     <pre className="bg-[#0f1218] border border-[#262b36] rounded-lg p-4 text-xs text-[#c8d1dc] overflow-auto max-h-[70vh] whitespace-pre-wrap break-words">
@@ -47,21 +62,52 @@ function PromptBlock({ label, value }: { label: string; value: string }) {
   );
 }
 
+function ParamGrid({
+  data,
+  order,
+  skipKeys,
+}: {
+  data: Record<string, unknown>;
+  order: Array<[string, string]>;
+  skipKeys: Set<string>;
+}) {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+      {order
+        .filter(([k]) => !skipKeys.has(k))
+        .map(([k, label]) => {
+          const v = data[k];
+          if (v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0))
+            return null;
+          const text = Array.isArray(v) ? v.join(", ") : String(v);
+          return (
+            <div
+              key={k}
+              className="bg-[#151922] border border-[#262b36] rounded-lg px-3 py-2"
+            >
+              <div className="text-xs text-[#aeb6c2]">{label}</div>
+              <div className="text-sm text-[#e6edf3] font-mono break-all">
+                {text}
+              </div>
+            </div>
+          );
+        })}
+    </div>
+  );
+}
+
 export default function MetadataView({ metadata, perImage }: Props) {
   const [view, setView] = useState<"formatted" | "json">("formatted");
 
   if (!metadata && !perImage) {
-    return (
-      <div className="text-sm text-[#aeb6c2]">无元数据</div>
-    );
+    return <div className="text-sm text-[#aeb6c2]">无元数据</div>;
   }
 
   // 多图时用 perImage（当前图参数）；否则用 metadata 顶层
-  const data = perImage ?? metadata;
-  const isNai =
-    data !== null &&
-    data !== undefined &&
-    (data._source_file !== undefined || "prompt" in data || "uc" in data);
+  const data = (perImage ?? metadata) as Record<string, unknown> | null;
+
+  // 判定格式：_format 优先；老数据（无 _format 但有 prompt/uc）视为 nai
+  const fmt = data?._format === "comfyui" ? "comfyui" : data?._format === "manual" ? "manual" : "nai";
 
   return (
     <div>
@@ -76,7 +122,7 @@ export default function MetadataView({ metadata, perImage }: Props) {
                 : "bg-[#151922] border-[#262b36] text-[#aeb6c2] hover:border-[#4c9fff]"
             }`}
           >
-            指令视图
+            {fmt === "comfyui" ? "工作流视图" : "指令视图"}
           </button>
           <button
             onClick={() => setView("json")}
@@ -92,34 +138,38 @@ export default function MetadataView({ metadata, perImage }: Props) {
       </div>
 
       {view === "json" ? (
-        <JsonView data={(data as Record<string, unknown>) ?? {}} />
-      ) : isNai ? (
+        <JsonView data={data ?? {}} />
+      ) : fmt === "comfyui" ? (
         <div>
-          <PromptBlock label="Prompt" value={String(data.prompt ?? "")} />
-          <PromptBlock label="Negative Prompt" value={String(data.uc ?? "")} />
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {NAI_ORDER.filter(([k]) => k !== "prompt" && k !== "uc").map(
-              ([k, label]) => {
-                const v = data[k];
-                if (v === undefined || v === null || v === "") return null;
-                return (
-                  <div
-                    key={k}
-                    className="bg-[#151922] border border-[#262b36] rounded-lg px-3 py-2"
-                  >
-                    <div className="text-xs text-[#aeb6c2]">{label}</div>
-                    <div className="text-sm text-[#e6edf3] font-mono break-all">
-                      {String(v)}
-                    </div>
-                  </div>
-                );
-              },
-            )}
-          </div>
+          <PromptBlock label="Prompt" value={String(data?.prompt ?? "")} />
+          <PromptBlock label="Negative Prompt" value={String(data?.uc ?? "")} />
+          <ParamGrid
+            data={data ?? {}}
+            order={COMFY_ORDER}
+            skipKeys={new Set(["prompt", "uc"])}
+          />
+        </div>
+      ) : fmt === "manual" ? (
+        <div className="text-sm text-[#aeb6c2] space-y-1">
+          {data?.prompt ? (
+            <PromptBlock label="Prompt" value={String(data.prompt)} />
+          ) : null}
+          {data?.uc ? (
+            <PromptBlock label="Negative Prompt" value={String(data.uc)} />
+          ) : null}
+          {!data?.prompt && !data?.uc && (
+            <span>该作品为手动上传，无结构化参数。</span>
+          )}
         </div>
       ) : (
-        <div className="text-sm text-[#aeb6c2]">
-          该图片没有 NovelAI 结构化参数，可切换到 JSON 原文查看。
+        <div>
+          <PromptBlock label="Prompt" value={String(data?.prompt ?? "")} />
+          <PromptBlock label="Negative Prompt" value={String(data?.uc ?? "")} />
+          <ParamGrid
+            data={data ?? {}}
+            order={NAI_ORDER}
+            skipKeys={new Set(["prompt", "uc"])}
+          />
         </div>
       )}
     </div>

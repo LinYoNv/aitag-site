@@ -1,7 +1,7 @@
 // PNG 元数据解析器 —— 浏览器端运行（纯 TS，不依赖 Node/第三方包）
 // 解析 PNG 的 tEXt chunk，提取 NovelAI 内嵌的 Comment JSON。
 
-import type { NovelAiMetadata, PngParseResult } from "./types";
+import type { NovelAiMetadata, ComfyUiMetadata, PngParseResult } from "./types";
 
 // 从 Uint8Array 解码 latin1 字符串
 function decodeLatin1(bytes: Uint8Array): string {
@@ -77,6 +77,139 @@ function normalizeNovelAi(comment: Record<string, unknown>): NovelAiMetadata {
   };
 }
 
+// ComfyUI 解析：读 PNG 内嵌的 workflow JSON（tEXt "prompt" / "workflow"）
+export function parseComfyUi(metadata: string | null): ComfyUiMetadata | null {
+  if (!metadata) return null;
+  let graph: Record<string, { class_type?: string; inputs?: Record<string, unknown> }>;
+  try {
+    const parsed = JSON.parse(metadata) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    graph = parsed as Record<string, { class_type?: string; inputs?: Record<string, unknown> }>;
+  } catch {
+    return null;
+  }
+
+  const entries = Object.entries(graph);
+
+  // 取引用的节点文本（["nodeId", idx] 引用形式）
+  const getTextByRef = (ref: unknown): string => {
+    if (Array.isArray(ref) && typeof ref[0] === "string") {
+      const n = graph[ref[0]];
+      if (n && typeof n.inputs?.text === "string") return n.inputs.text;
+    }
+    return "";
+  };
+
+  // 采样器 / 生成节点
+  let samplerNode:
+    | { class_type?: string; inputs?: Record<string, unknown> }
+    | undefined;
+  for (const [, n] of entries) {
+    const t = n?.class_type ?? "";
+    if (
+      t === "KSampler" ||
+      t === "KSamplerAdvanced" ||
+      t === "SamplerCustom" ||
+      t === "SamplerCustomAdvanced"
+    ) {
+      samplerNode = n;
+      break;
+    }
+  }
+
+  let positive = "";
+  let negative = "";
+  if (samplerNode) {
+    positive = getTextByRef(samplerNode.inputs?.positive);
+    negative = getTextByRef(
+      samplerNode.inputs?.negative ??
+        (samplerNode.inputs as Record<string, unknown> | undefined)?.negative_cond,
+    );
+  }
+  // 兜底：取任一 CLIPTextEncode 的 text
+  if (!positive) {
+    for (const [, n] of entries) {
+      if (n?.class_type === "CLIPTextEncode" && typeof n.inputs?.text === "string") {
+        positive = n.inputs.text;
+        break;
+      }
+    }
+  }
+  if (!negative) {
+    for (const [, n] of entries) {
+      if (
+        (n?.class_type === "CLIPTextEncode" ||
+          n?.class_type === "CLIPTextEncodeAdvanced") &&
+        typeof n.inputs?.text === "string" &&
+        n.inputs.text !== positive
+      ) {
+        negative = n.inputs.text;
+        break;
+      }
+    }
+  }
+
+  const sampler = String(
+    (samplerNode?.inputs as Record<string, unknown> | undefined)?.sampler_name ??
+      (samplerNode?.inputs as Record<string, unknown> | undefined)?.sampler ??
+      "",
+  );
+  const scheduler = String(
+    (samplerNode?.inputs as Record<string, unknown> | undefined)?.scheduler ?? "",
+  );
+  const steps = Number((samplerNode?.inputs as Record<string, unknown> | undefined)?.steps ?? 0);
+  const cfg = Number((samplerNode?.inputs as Record<string, unknown> | undefined)?.cfg ?? 0);
+  const seed = Number((samplerNode?.inputs as Record<string, unknown> | undefined)?.seed ?? 0);
+
+  // 底模（checkpoint / unet）
+  let model = "";
+  for (const [, n] of entries) {
+    const t = n?.class_type ?? "";
+    if (
+      (t.includes("Checkpoint") || t.includes("UNET") || t.includes("VAE")) &&
+      typeof (n.inputs as Record<string, unknown> | undefined)?.ckpt_name === "string"
+    ) {
+      model = String((n.inputs as Record<string, unknown>).ckpt_name);
+      break;
+    }
+  }
+
+  // LoRA（可多个）
+  const loras: string[] = [];
+  for (const [, n] of entries) {
+    const t = n?.class_type ?? "";
+    if (t.includes("Lora") && typeof (n.inputs as Record<string, unknown> | undefined)?.lora_name === "string") {
+      loras.push(String((n.inputs as Record<string, unknown>).lora_name));
+    }
+  }
+
+  // 尺寸（EmptyLatentImage）
+  let width = 0;
+  let height = 0;
+  for (const [, n] of entries) {
+    if (n?.class_type === "EmptyLatentImage") {
+      width = Number((n.inputs as Record<string, unknown> | undefined)?.width ?? 0);
+      height = Number((n.inputs as Record<string, unknown> | undefined)?.height ?? 0);
+      if (width && height) break;
+    }
+  }
+
+  return {
+    prompt: positive,
+    negativePrompt: negative,
+    model,
+    loras,
+    sampler,
+    scheduler,
+    steps,
+    cfg,
+    seed,
+    width,
+    height,
+    rawJson: metadata,
+  };
+}
+
 // 主入口：解析 PNG 文件，返回元数据
 export function parsePngMetadata(buf: ArrayBuffer): PngParseResult {
   try {
@@ -98,6 +231,20 @@ export function parsePngMetadata(buf: ArrayBuffer): PngParseResult {
       if (c.type === "tEXt") {
         const { keyword, value } = parseTextChunk(c.data);
         texts[keyword] = value;
+      }
+    }
+
+    // ComfyUI 把 workflow 存在 tEXt "prompt" / "workflow"
+    if (texts.prompt || texts.workflow) {
+      const comfyui = parseComfyUi(texts.prompt || texts.workflow);
+      if (comfyui) {
+        return {
+          ok: true,
+          metadata: { ...texts },
+          comfyui,
+          width: comfyui.width || width,
+          height: comfyui.height || height,
+        };
       }
     }
 

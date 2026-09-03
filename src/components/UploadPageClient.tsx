@@ -2,9 +2,11 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
-import { parsePngMetadata } from "@/lib/png";
+import { parsePngMetadata, parseComfyUi } from "@/lib/png";
 import type { PngParseResult } from "@/lib/types";
 import UserBadge from "@/components/UserBadge";
+
+type UploadMode = "nai" | "comfyui" | "manual";
 
 interface UserInfo {
   username: string;
@@ -13,24 +15,100 @@ interface UserInfo {
   avatar?: string;
 }
 
+// 每个文件的可编辑参数
 interface FileEntry {
   file: File;
   url: string;
   parseResult: PngParseResult | null;
+  // 可编辑字段（字符串方便输入框绑定）
   prompt: string;
   negative: string;
+  sampler: string;
+  steps: string;
+  scale: string; // NAI: CFG Scale
+  cfg: string; // ComfyUI: CFG
+  seed: string;
+  width: string;
+  height: string;
+  model: string;
+  scheduler: string;
+  loras: string; // 逗号分隔
+  // ComfyUI 手动粘贴的 workflow JSON
+  comfyRaw: string;
+  // 是否成功解析出结构化参数
+  parsed: boolean;
+  hasComfy: boolean; // 该图读到了 comfyui 参数
+  hasNai: boolean; // 该图读到了 novelai 参数
+}
+
+const empty = (): Omit<FileEntry, "file" | "url" | "parseResult"> => ({
+  prompt: "",
+  negative: "",
+  sampler: "",
+  steps: "",
+  scale: "",
+  cfg: "",
+  seed: "",
+  width: "",
+  height: "",
+  model: "",
+  scheduler: "",
+  loras: "",
+  comfyRaw: "",
+  parsed: false,
+  hasComfy: false,
+  hasNai: false,
+});
+
+const CARD_STYLES = {
+  base: "text-left p-4 rounded-xl border-2 transition-all",
+  active:
+    "border-[#4c9fff] bg-gradient-to-br from-[#16233a] to-[#10131a] shadow-[0_0_20px_rgba(76,159,255,0.15)]",
+  inactive: "border-[#262b36] bg-[#11141b] hover:border-[#3a4a63]",
+};
+
+const RADIO = {
+  base: "w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors",
+  on: "border-[#4c9fff] bg-[#4c9fff]",
+  off: "border-[#3a4252]",
+};
+
+function ParamField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <div>
+      <label className="block text-[11px] text-[#7a8394] mb-0.5">{label}</label>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        placeholder={placeholder}
+        className="w-full bg-[#0f1218] border border-[#262b36] rounded-md px-2 py-1.5 text-xs text-[#e6edf3] font-mono outline-none focus:border-[#4c9fff] disabled:opacity-40"
+      />
+    </div>
+  );
 }
 
 export default function UploadPageClient({ user }: { user: UserInfo }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [tab, setTab] = useState<"png" | "manual">("png");
+  const [tab, setTab] = useState<UploadMode>("nai");
 
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [dragging, setDragging] = useState(false);
 
   const [title, setTitle] = useState("");
   const [caption, setCaption] = useState("");
-  const [aiType, setAiType] = useState("nai");
   const [manualPrompt, setManualPrompt] = useState("");
   const [manualNegative, setManualNegative] = useState("");
   const [shareTitle, setShareTitle] = useState(false);
@@ -40,28 +118,62 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
     null,
   );
 
+  const aiType = tab === "nai" ? "nai" : tab === "comfyui" ? "comfyui" : "other";
+
+  const switchMode = (m: UploadMode) => {
+    setTab(m);
+    setEntries([]);
+    setResult(null);
+  };
+
   async function handleFiles(fileList: FileList | File[]) {
     const files = Array.from(fileList);
     if (files.length === 0) return;
 
     const newEntries: FileEntry[] = [];
     for (const file of files) {
+      const base = empty();
       const entry: FileEntry = {
         file,
         url: URL.createObjectURL(file),
         parseResult: null,
-        prompt: "",
-        negative: "",
+        ...base,
       };
 
-      if (tab === "png" && file.type === "image/png") {
+      if (file.type === "image/png") {
         try {
           const buf = await file.arrayBuffer();
           const res = parsePngMetadata(buf);
           entry.parseResult = res;
+          entry.parsed = res.ok;
+          // NAI 解析结果
           if (res.ok && res.novelai) {
+            entry.hasNai = true;
             entry.prompt = res.novelai.prompt;
             entry.negative = res.novelai.negativePrompt;
+            entry.sampler = res.novelai.sampler;
+            entry.steps = String(res.novelai.steps || "");
+            entry.scale = String(res.novelai.scale || "");
+            entry.seed = String(res.novelai.seed || "");
+            entry.width = String(res.novelai.width || "");
+            entry.height = String(res.novelai.height || "");
+            entry.model = res.novelai.model && res.novelai.model !== "NovelAI" ? res.novelai.model : "";
+          }
+          // ComfyUI 解析结果
+          if (res.ok && res.comfyui) {
+            entry.hasComfy = true;
+            entry.prompt = res.comfyui.prompt;
+            entry.negative = res.comfyui.negativePrompt;
+            entry.sampler = res.comfyui.sampler;
+            entry.cfg = String(res.comfyui.cfg || "");
+            entry.seed = String(res.comfyui.seed || "");
+            entry.width = String(res.comfyui.width || "");
+            entry.height = String(res.comfyui.height || "");
+            entry.model = res.comfyui.model;
+            entry.scheduler = res.comfyui.scheduler;
+            entry.steps = String(res.comfyui.steps || "");
+            entry.loras = (res.comfyui.loras ?? []).join(", ");
+            entry.comfyRaw = res.comfyui.rawJson ?? "";
           }
         } catch {
           entry.parseResult = { ok: false, error: "失败：解析出错" };
@@ -76,6 +188,36 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
 
   function removeEntry(index: number) {
     setEntries((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function patchEntry(i: number, patch: Partial<FileEntry>) {
+    setEntries((prev) => prev.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
+  }
+
+  // 应用粘贴的 ComfyUI workflow JSON 到某个 entry
+  function applyComfyJson(i: number) {
+    const entry = entries[i];
+    const c = parseComfyUi(entry.comfyRaw);
+    if (!c) {
+      setResult({ ok: false, msg: "该 JSON 不符合 ComfyUI 工作流结构" });
+      return;
+    }
+    patchEntry(i, {
+      prompt: c.prompt,
+      negative: c.negativePrompt,
+      sampler: c.sampler,
+      cfg: String(c.cfg || ""),
+      seed: String(c.seed || ""),
+      width: String(c.width || ""),
+      height: String(c.height || ""),
+      model: c.model,
+      scheduler: c.scheduler,
+      steps: String(c.steps || ""),
+      loras: (c.loras ?? []).join(", "),
+      parsed: true,
+      hasComfy: true,
+    });
+    setResult({ ok: true, msg: "已从 JSON 解析出 ComfyUI 参数" });
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -97,41 +239,54 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
 
       entries.forEach((entry, i) => {
         form.append("files", entry.file);
-        let meta: Record<string, unknown> | null = null;
-        if (tab === "png") {
-          // 平铺 NovelAI comment 里的完整参数到顶层，供详情页展示
+        let meta: Record<string, unknown>;
+
+        if (tab === "nai") {
+          meta = {
+            _format: "nai",
+            prompt: entry.prompt,
+            uc: entry.negative,
+            sampler: entry.sampler || null,
+            steps: entry.steps ? Number(entry.steps) : null,
+            width: entry.width ? Number(entry.width) : null,
+            height: entry.height ? Number(entry.height) : null,
+            scale: entry.scale ? Number(entry.scale) : null,
+            seed: entry.seed ? Number(entry.seed) : null,
+            noise_schedule: null,
+            model: entry.model || null,
+          };
+          // 若 PNG 自带 comment，保留完整 comment 供 JSON 视图
           const rawMeta = entry.parseResult?.metadata as
             | (Record<string, unknown> & { comment?: Record<string, unknown> })
             | undefined;
-          const comment = rawMeta?.comment;
+          if (rawMeta?.comment) meta.comment = rawMeta.comment;
+        } else if (tab === "comfyui") {
           meta = {
+            _format: "comfyui",
             prompt: entry.prompt,
             uc: entry.negative,
-            ...(rawMeta ?? {}),
-            // comment 内的关键生成参数平铺到顶层（与种子数据一致）
-            ...(comment && typeof comment === "object"
-              ? {
-                  sampler: comment.sampler,
-                  steps: comment.steps,
-                  width: comment.width,
-                  height: comment.height,
-                  scale: comment.scale,
-                  seed: comment.seed,
-                  noise_schedule: comment.noise_schedule,
-                  sm: comment.sm,
-                  sm_dyn: comment.sm_dyn,
-                  dynamic_thresholding: comment.dynamic_thresholding,
-                  cfg_rescale: comment.cfg_rescale,
-                  uncond_scale: comment.uncond_scale,
-                  version: comment.version,
-                  request_type: comment.request_type,
-                }
-              : {}),
+            model: entry.model || null,
+            loras: entry.loras
+              ? entry.loras
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+              : [],
+            sampler: entry.sampler || null,
+            scheduler: entry.scheduler || null,
+            steps: entry.steps ? Number(entry.steps) : null,
+            cfg: entry.cfg ? Number(entry.cfg) : null,
+            seed: entry.seed ? Number(entry.seed) : null,
+            width: entry.width ? Number(entry.width) : null,
+            height: entry.height ? Number(entry.height) : null,
+            rawJson: entry.comfyRaw || null,
           };
-          // 保留 comment 本身（JSON 视图可用）
-          meta.comment = comment ?? null;
         } else {
-          meta = { prompt: manualPrompt || null, uc: manualNegative || null };
+          meta = {
+            _format: "manual",
+            prompt: manualPrompt || null,
+            uc: manualNegative || null,
+          };
         }
         form.append(`meta_${i}`, JSON.stringify(meta));
       });
@@ -168,104 +323,187 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
     }
   }
 
-  // 当前上传方式下的参数预览（供上传者确认）
+  const isManual = tab === "manual";
+  const isComfy = tab === "comfyui";
+
+  // 当前上传方式下的参数预览（每张图可编辑）
   function renderParamPreview() {
     if (entries.length === 0) return null;
     return (
       <div className="mt-6">
         <div className="flex items-center gap-2 mb-3">
           <h3 className="text-sm font-semibold text-[#e6edf3]">
-            参数预览（确认无误后提交）
+            参数预览（可编辑，确认无误后提交）
           </h3>
           <span className="text-xs text-[#5a6270]">共 {entries.length} 张</span>
         </div>
         <div className="space-y-3">
-          {entries.map((entry, i) => (
-            <div
-              key={i}
-              className="bg-[#151922] border border-[#262b36] rounded-xl p-3"
-            >
-              <div className="flex items-center gap-3 mb-2">
-                <img
-                  src={entry.url}
-                  alt={`图片 ${i + 1}`}
-                  className="w-14 h-14 object-cover rounded-lg shrink-0"
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium text-[#e6edf3]">
-                      图片 {i + 1}
-                    </span>
-                    {tab === "png" ? (
-                      entry.parseResult?.ok ? (
-                        <span className="text-[11px] px-1.5 py-0.5 rounded bg-[#14241a] text-[#7aff9a] border border-[#2a4a2a]">
-                          ✓ 已解析
-                        </span>
-                      ) : (
-                        <span className="text-[11px] px-1.5 py-0.5 rounded bg-[#2a1a1a] text-[#ff7a7a] border border-[#5a2a2a]">
-                          {entry.parseResult?.error ?? "失败"}
-                        </span>
-                      )
-                    ) : (
-                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-[#1a2233] text-[#4c9fff] border border-[#2a3a55]">
-                        手动参数
+          {entries.map((entry, i) => {
+            const hasAuto = tab === "nai" ? entry.hasNai : entry.hasComfy;
+            return (
+              <div
+                key={i}
+                className="bg-[#151922] border border-[#262b36] rounded-xl p-3"
+              >
+                <div className="flex items-center gap-3 mb-2">
+                  <img
+                    src={entry.url}
+                    alt={`图片 ${i + 1}`}
+                    className="w-14 h-14 object-cover rounded-lg shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-[#e6edf3]">
+                        图片 {i + 1}
                       </span>
-                    )}
-                    <button
-                      onClick={() => removeEntry(i)}
-                      className="ml-auto text-xs text-[#aeb6c2] hover:text-red-400 px-2 py-0.5 rounded hover:bg-[#2a1a1a]"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  {tab === "png" && entry.parseResult?.ok && (
-                    <div className="text-[11px] text-[#5a6270] mt-1 font-mono truncate">
-                      {entry.parseResult.novelai?.sampler} ·{" "}
-                      {entry.parseResult.novelai?.steps} 步 · seed{" "}
-                      {entry.parseResult.novelai?.seed} ·{" "}
-                      {entry.parseResult.width}×{entry.parseResult.height}
+                      {entry.parseResult ? (
+                        entry.parsed ? (
+                          <span className="text-[11px] px-1.5 py-0.5 rounded bg-[#14241a] text-[#7aff9a] border border-[#2a4a2a]">
+                            {hasAuto ? "✓ 已解析" : "✓ 已读（无此类型参数）"}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] px-1.5 py-0.5 rounded bg-[#2a1a1a] text-[#ff7a7a] border border-[#5a2a2a]">
+                            {entry.parseResult.error ?? "失败"}
+                          </span>
+                        )
+                      ) : (
+                        <span className="text-[11px] px-1.5 py-0.5 rounded bg-[#1a2233] text-[#4c9fff] border border-[#2a3a55]">
+                          手动参数
+                        </span>
+                      )}
+                      <button
+                        onClick={() => removeEntry(i)}
+                        className="ml-auto text-xs text-[#aeb6c2] hover:text-red-400 px-2 py-0.5 rounded hover:bg-[#2a1a1a]"
+                      >
+                        ✕
+                      </button>
                     </div>
-                  )}
+                    {(entry.hasNai || entry.hasComfy) && (
+                      <div className="text-[11px] text-[#5a6270] mt-1 font-mono truncate">
+                        {entry.sampler || "?"} · {entry.steps || "?"} 步 · seed{" "}
+                        {entry.seed || "?"} · {entry.width || "?"}×
+                        {entry.height || "?"}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              {/* 可编辑参数 */}
-              {tab === "png" ? (
-                <>
-                  <textarea
-                    value={entry.prompt}
-                    onChange={(e) =>
-                      setEntries((prev) =>
-                        prev.map((p, idx) =>
-                          idx === i ? { ...p, prompt: e.target.value } : p,
-                        ),
-                      )
-                    }
-                    placeholder="Prompt（可修改）"
-                    rows={2}
-                    className="w-full bg-[#0f1218] border border-[#262b36] rounded-lg px-3 py-2 text-xs text-[#e6edf3] font-mono outline-none focus:border-[#4c9fff] mb-2 resize-y"
-                  />
-                  <textarea
-                    value={entry.negative}
-                    onChange={(e) =>
-                      setEntries((prev) =>
-                        prev.map((p, idx) =>
-                          idx === i ? { ...p, negative: e.target.value } : p,
-                        ),
-                      )
-                    }
-                    placeholder="Negative Prompt（可修改）"
-                    rows={1}
-                    className="w-full bg-[#0f1218] border border-[#262b36] rounded-lg px-3 py-2 text-xs text-[#e6edf3] font-mono outline-none focus:border-[#4c9fff] resize-y"
-                  />
-                </>
-              ) : (
-                <div className="text-xs text-[#5a6270]">
-                  将使用下方统一的 Prompt / Negative 参数
-                </div>
-              )}
-            </div>
-          ))}
+                {isManual ? (
+                  <div className="text-xs text-[#5a6270]">
+                    将使用下方统一的 Prompt / Negative 参数
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {/* 首行：Prompt 与 Negative */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] text-[#7a8394] mb-0.5">
+                          Prompt（可修改）
+                        </label>
+                        <textarea
+                          value={entry.prompt}
+                          onChange={(e) => patchEntry(i, { prompt: e.target.value })}
+                          rows={3}
+                          className="w-full bg-[#0f1218] border border-[#262b36] rounded-lg px-2 py-1.5 text-xs text-[#e6edf3] font-mono outline-none focus:border-[#4c9fff] resize-y"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-[#7a8394] mb-0.5">
+                          Negative Prompt（可修改）
+                        </label>
+                        <textarea
+                          value={entry.negative}
+                          onChange={(e) => patchEntry(i, { negative: e.target.value })}
+                          rows={3}
+                          className="w-full bg-[#0f1218] border border-[#262b36] rounded-lg px-2 py-1.5 text-xs text-[#e6edf3] font-mono outline-none focus:border-[#4c9fff] resize-y"
+                        />
+                      </div>
+                    </div>
+
+                    {/* ComfyUI：JSON 粘贴与应用 */}
+                    {isComfy && (
+                      <div className="border-t border-[#262b36] pt-2">
+                        <label className="block text-[11px] text-[#7a8394] mb-1">
+                          或粘贴 ComfyUI workflow JSON（若 PNG 未自动解析）
+                        </label>
+                        <div className="flex gap-2">
+                          <textarea
+                            value={entry.comfyRaw}
+                            onChange={(e) => patchEntry(i, { comfyRaw: e.target.value })}
+                            rows={2}
+                            placeholder='{"3": {"class_type": "...", "inputs": {...}} ...}'
+                            className="flex-1 bg-[#0f1218] border border-[#262b36] rounded-lg px-2 py-1.5 text-xs text-[#e6edf3] font-mono outline-none focus:border-[#4c9fff] resize-y"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => applyComfyJson(i)}
+                            className="self-center bg-[#151922] border border-[#4c9fff] text-[#4c9fff] text-xs px-3 py-1.5 rounded-lg hover:bg-[#1a2233] whitespace-nowrap"
+                          >
+                            应用 JSON
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 参数网格 */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      <ParamField
+                        label="Sampler 采样器"
+                        value={entry.sampler}
+                        onChange={(v) => patchEntry(i, { sampler: v })}
+                      />
+                      <ParamField
+                        label={isComfy ? "CFG" : "Scale (CFG)"}
+                        value={isComfy ? entry.cfg : entry.scale}
+                        onChange={(v) => patchEntry(i, isComfy ? { cfg: v } : { scale: v })}
+                      />
+                      <ParamField
+                        label="Steps 步数"
+                        value={entry.steps}
+                        onChange={(v) => patchEntry(i, { steps: v })}
+                      />
+                      <ParamField
+                        label="Seed 种子"
+                        value={entry.seed}
+                        onChange={(v) => patchEntry(i, { seed: v })}
+                      />
+                      <ParamField
+                        label="Width 宽"
+                        value={entry.width}
+                        onChange={(v) => patchEntry(i, { width: v })}
+                      />
+                      <ParamField
+                        label="Height 高"
+                        value={entry.height}
+                        onChange={(v) => patchEntry(i, { height: v })}
+                      />
+                      {isComfy && (
+                        <ParamField
+                          label="Scheduler"
+                          value={entry.scheduler}
+                          onChange={(v) => patchEntry(i, { scheduler: v })}
+                        />
+                      )}
+                      <ParamField
+                        label={isComfy ? "Model 底模" : "Model"}
+                        value={entry.model}
+                        onChange={(v) => patchEntry(i, { model: v })}
+                      />
+                      {isComfy && (
+                        <div className="sm:col-span-2">
+                          <ParamField
+                            label="LoRA（多个用逗号分隔）"
+                            value={entry.loras}
+                            onChange={(v) => patchEntry(i, { loras: v })}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     );
@@ -293,73 +531,72 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
       <main className="max-w-3xl mx-auto px-6 py-6">
         <h1 className="text-xl font-bold text-[#e6edf3] mb-5">上传作品</h1>
 
-        {/* 选择上传方式：两个切换卡片 */}
-        <div className="grid grid-cols-2 gap-3 mb-6">
+        {/* 三种上传方式卡片 */}
+        <div className="grid grid-cols-3 gap-3 mb-6">
+          {/* NAI */}
           <button
-            onClick={() => {
-              setTab("png");
-              setEntries([]);
-              setResult(null);
-            }}
-            className={`text-left p-4 rounded-xl border-2 transition-all ${
-              tab === "png"
-                ? "border-[#4c9fff] bg-gradient-to-br from-[#16233a] to-[#10131a] shadow-[0_0_20px_rgba(76,159,255,0.15)]"
-                : "border-[#262b36] bg-[#11141b] hover:border-[#3a4a63]"
+            onClick={() => switchMode("nai")}
+            className={`${CARD_STYLES.base} ${
+              tab === "nai" ? CARD_STYLES.active : CARD_STYLES.inactive
             }`}
           >
             <div className="flex items-center gap-2 mb-2">
               <span
-                className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${
-                  tab === "png"
-                    ? "border-[#4c9fff] bg-[#4c9fff]"
-                    : "border-[#3a4252]"
-                }`}
+                className={`${RADIO.base} ${tab === "nai" ? RADIO.on : RADIO.off}`}
               >
-                {tab === "png" && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-white" />
-                )}
+                {tab === "nai" && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
               </span>
-              <span className="text-[#e6edf3] font-semibold text-sm">
-                自带元数据
-              </span>
+              <span className="text-[#e6edf3] font-semibold text-sm">NAI 版本</span>
               <span className="ml-auto text-[#5a6270] text-xs">PNG</span>
             </div>
             <p className="text-xs text-[#7a8394] leading-relaxed">
-              NovelAI / SD 生成的 PNG 内含完整参数，自动读取
+              NovelAI 生成的 PNG 内含完整参数，自动读取并可在上传时修改
             </p>
           </button>
 
+          {/* ComfyUI */}
           <button
-            onClick={() => {
-              setTab("manual");
-              setEntries([]);
-              setResult(null);
-            }}
-            className={`text-left p-4 rounded-xl border-2 transition-all ${
-              tab === "manual"
-                ? "border-[#4c9fff] bg-gradient-to-br from-[#16233a] to-[#10131a] shadow-[0_0_20px_rgba(76,159,255,0.15)]"
-                : "border-[#262b36] bg-[#11141b] hover:border-[#3a4a63]"
+            onClick={() => switchMode("comfyui")}
+            className={`${CARD_STYLES.base} ${
+              tab === "comfyui" ? CARD_STYLES.active : CARD_STYLES.inactive
             }`}
           >
             <div className="flex items-center gap-2 mb-2">
               <span
-                className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${
-                  tab === "manual"
-                    ? "border-[#4c9fff] bg-[#4c9fff]"
-                    : "border-[#3a4252]"
+                className={`${RADIO.base} ${
+                  tab === "comfyui" ? RADIO.on : RADIO.off
                 }`}
               >
-                {tab === "manual" && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-white" />
-                )}
+                {tab === "comfyui" && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
               </span>
-              <span className="text-[#e6edf3] font-semibold text-sm">
-                不带元数据
+              <span className="text-[#e6edf3] font-semibold text-sm">ComfyUI 版本</span>
+              <span className="ml-auto text-[#5a6270] text-xs">PNG/JSON</span>
+            </div>
+            <p className="text-xs text-[#7a8394] leading-relaxed">
+              自动读取内嵌工作流参数；读不到可粘贴 workflow JSON（底模/LoRA/提示词等）
+            </p>
+          </button>
+
+          {/* 无参数 */}
+          <button
+            onClick={() => switchMode("manual")}
+            className={`${CARD_STYLES.base} ${
+              tab === "manual" ? CARD_STYLES.active : CARD_STYLES.inactive
+            }`}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <span
+                className={`${RADIO.base} ${
+                  tab === "manual" ? RADIO.on : RADIO.off
+                }`}
+              >
+                {tab === "manual" && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
               </span>
+              <span className="text-[#e6edf3] font-semibold text-sm">自行上传无参数</span>
               <span className="ml-auto text-[#5a6270] text-xs">JPG/WebP</span>
             </div>
             <p className="text-xs text-[#7a8394] leading-relaxed">
-              普通图片，手动填写 Prompt 与参数
+              普通图片，手动填写 Prompt 与相关参数（类型为「自定义」）
             </p>
           </button>
         </div>
@@ -386,7 +623,13 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
           <input
             ref={fileInputRef}
             type="file"
-            accept={tab === "png" ? "image/png" : "image/png,image/jpeg,image/webp"}
+            accept={
+              tab === "nai"
+                ? "image/png"
+                : tab === "manual"
+                  ? "image/png,image/jpeg,image/webp"
+                  : "image/png,image/jpeg,image/webp"
+            }
             multiple
             className="hidden"
             onChange={(e) => {
@@ -404,15 +647,13 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
             ⬆
           </div>
           <div className="text-[#e6edf3] text-base font-medium mb-1.5">
-            {tab === "png"
-              ? "拖拽 PNG 图片到此处，或点击选择"
-              : "拖拽图片到此处，或点击选择"}
+            {isManual
+              ? "拖拽图片到此处，或点击选择"
+              : "拖拽 PNG 图片到此处，或点击选择"}
           </div>
           <div className="text-[#5a6270] text-sm">
             支持 png、jpg 等图片格式
-            {tab === "png" && (
-              <span className="text-[#4c9fff]"> · 自动读取参数</span>
-            )}
+            {!isManual && <span className="text-[#4c9fff]"> · 自动读取参数</span>}
           </div>
         </div>
 
@@ -435,7 +676,6 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
                 </label>
               )}
             </div>
-            {/* 简单缩略图行 */}
             <div className="flex gap-2 flex-wrap mb-4">
               {entries.map((entry, i) => (
                 <div key={i} className="relative group">
@@ -484,22 +724,19 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
             </div>
           </div>
 
+          {/* 类型改为只读展示（由上方卡片决定） */}
           <div>
             <label className="block text-sm text-[#e6edf3] mb-1">类型</label>
-            <select
-              value={aiType}
-              onChange={(e) => setAiType(e.target.value)}
-              className="bg-[#151922] border border-[#262b36] rounded-lg px-3 py-2 text-sm text-[#e6edf3]"
-            >
-              <option value="nai">NovelAI</option>
-              <option value="nai_x">NAI-X</option>
-              <option value="sd">Stable Diffusion</option>
-              <option value="comfyui">ComfyUI</option>
-              <option value="other">其他</option>
-            </select>
+            <div className="bg-[#151922] border border-[#262b36] rounded-lg px-3 py-2 text-sm text-[#4c9fff]">
+              {aiType === "nai"
+                ? "NovelAI"
+                : aiType === "comfyui"
+                  ? "ComfyUI"
+                  : "自定义"}
+            </div>
           </div>
 
-          {tab === "manual" && (
+          {isManual && (
             <>
               <div>
                 <label className="block text-sm text-[#e6edf3] mb-1">
