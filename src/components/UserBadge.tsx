@@ -50,7 +50,7 @@ export default function UserBadge({ username, isAdmin, avatar }: Props) {
   }
 
   return (
-    <div className="relative shrink-0" ref={ref}>
+    <div className="relative shrink-0 ml-auto" ref={ref}>
       {/* 头像按钮 */}
       <button
         onClick={() => setOpen((o) => !o)}
