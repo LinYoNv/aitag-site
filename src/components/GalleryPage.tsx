@@ -15,7 +15,8 @@ interface UserInfo {
 export default function GalleryPage({ user }: { user: UserInfo }) {
   const [q, setQ] = useState("");
   const [input, setInput] = useState("");
-  const [sort, setSort] = useState<"new" | "monthly">("new");
+  const [aiType, setAiType] = useState("all");
+  const [sort, setSort] = useState<"new" | "old" | "bookmarks">("new");
   const [page, setPage] = useState(1);
   const [data, setData] = useState<PagedWorks | null>(null);
   const [loading, setLoading] = useState(true);
@@ -27,6 +28,7 @@ export default function GalleryPage({ user }: { user: UserInfo }) {
     try {
       const params = new URLSearchParams();
       if (q) params.set("q", q);
+      if (aiType && aiType !== "all") params.set("ai_type", aiType);
       params.set("sort", sort);
       params.set("page", String(page));
       params.set("page_size", "24");
@@ -38,7 +40,7 @@ export default function GalleryPage({ user }: { user: UserInfo }) {
     } finally {
       setLoading(false);
     }
-  }, [q, sort, page]);
+  }, [q, aiType, sort, page]);
 
   useEffect(() => {
     load();
@@ -72,17 +74,37 @@ export default function GalleryPage({ user }: { user: UserInfo }) {
             搜索
           </button>
         </form>
-        <select
-          value={sort}
-          onChange={(e) => {
-            setSort(e.target.value as "new" | "monthly");
-            setPage(1);
-          }}
-          className="bg-[#151922] border border-[#262b36] rounded-lg px-2 py-1.5 text-sm text-[#e6edf3] max-sm:text-xs"
-        >
-          <option value="new">最新</option>
-          <option value="monthly">月榜</option>
-        </select>
+        <div className="flex items-center gap-2">
+          {/* 类型筛选 */}
+          <select
+            value={aiType}
+            onChange={(e) => {
+              setAiType(e.target.value);
+              setPage(1);
+            }}
+            title="类型筛选"
+            className="bg-[#151922] border border-[#262b36] rounded-lg px-2 py-1.5 text-sm text-[#e6edf3] max-sm:text-xs"
+          >
+            <option value="all">全部类型</option>
+            <option value="nai">NovelAI</option>
+            <option value="comfyui">ComfyUI</option>
+            <option value="other">自定义</option>
+          </select>
+          {/* 时间排序 */}
+          <select
+            value={sort}
+            onChange={(e) => {
+              setSort(e.target.value as "new" | "old" | "bookmarks");
+              setPage(1);
+            }}
+            title="时间排序"
+            className="bg-[#151922] border border-[#262b36] rounded-lg px-2 py-1.5 text-sm text-[#e6edf3] max-sm:text-xs"
+          >
+            <option value="new">最新</option>
+            <option value="old">最早</option>
+            <option value="bookmarks">最多收藏</option>
+          </select>
+        </div>
         <a
           href="/upload"
           className="bg-[#151922] border border-[#262b36] text-[#e6edf3] text-sm max-sm:text-xs px-3 sm:px-4 py-1.5 rounded-lg hover:border-[#4c9fff] whitespace-nowrap"

@@ -126,7 +126,8 @@ export function getWorkById(id: string): Work | null {
 export function listWorks(opts: {
   q?: string;
   prompt?: string;
-  sort?: "new" | "monthly";
+  sort?: "new" | "old" | "monthly" | "bookmarks";
+  ai_type?: string;
   time_range?: string;
   page?: number;
   page_size?: number;
@@ -149,12 +150,20 @@ export function listWorks(opts: {
     where.push("(metadata LIKE ?)");
     params.push(`%${opts.prompt}%`);
   }
+  // 类型筛选：只接受明确的 ai_type 值
+  if (opts.ai_type && ["sd", "nai", "nai_x", "comfyui", "other"].includes(opts.ai_type)) {
+    where.push("ai_type = ?");
+    params.push(opts.ai_type);
+  }
 
   const whereSql = where.length ? "WHERE " + where.join(" AND ") : "";
+  const s = opts.sort ?? "new";
   const orderSql =
-    opts.sort === "monthly"
-      ? "ORDER BY total_bookmarks DESC, total_view DESC, create_date DESC"
-      : "ORDER BY create_date DESC";
+    s === "old"
+      ? "ORDER BY create_date ASC"
+      : s === "monthly" || s === "bookmarks"
+        ? "ORDER BY total_bookmarks DESC, total_view DESC, create_date DESC"
+        : "ORDER BY create_date DESC";
 
   const total =
     (
