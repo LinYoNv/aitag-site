@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI绘画咒语图库 : AI TAG Prompt Art Gallery</title>
+        <meta data-seo="start" />
+    <meta name="description" content="专为 Stable Diffusion Web UI、ComfyUI 及 NovelAI 用户打造。在这里，您可以一键搜索海量作品与“咒语”参数，参考优秀范例，让 AI 绘画学习变得更简单高效 Built for Stable Diffusion, ComfyUI, and NovelAI. Search a vast library of images and prompts with one click. Reference top-tier examples to streamline your workflow and master AI art faster. [COMFYUI]跑步[149148566]" />
+    <meta name="robots" content="index,follow,max-image-preview:large" />
+    <link rel="canonical" href="https://aitag.win/" />
+
+    <link rel="alternate" hreflang="zh" href="https://aitag.win/?lang=zh" />
+    <link rel="alternate" hreflang="en" href="https://aitag.win/?lang=us" />
+    <link rel="alternate" hreflang="x-default" href="https://aitag.win/" />
+    <meta property="og:title" content="AI绘画咒语图库 : AI TAG Prompt Art Gallery" />
+    <meta property="og:description" content="专为 Stable Diffusion Web UI、ComfyUI 及 NovelAI 用户打造。在这里，您可以一键搜索海量作品与“咒语”参数，参考优秀范例，让 AI 绘画学习变得更简单高效 Built for Stable Diffusion, ComfyUI, and NovelAI. Search a vast library of images and prompts with one click. Reference top-tier examples to streamline your workflow and master AI art faster. [COMFYUI]跑步[149148566]" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="AI绘画咒语图库 : AI TAG Prompt Art Gallery" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:url" content="https://aitag.win/" />
+    <meta property="telegram:channel" content="@aitag_win" />
+    <meta property="og:image" content="https://ai-img.10118899.xyz/ComfyUI/77268706/149148566_p0.webp" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="AI绘画咒语图库 : AI TAG Prompt Art Gallery" />
+    <meta name="twitter:description" content="专为 Stable Diffusion Web UI、ComfyUI 及 NovelAI 用户打造。在这里，您可以一键搜索海量作品与“咒语”参数，参考优秀范例，让 AI 绘画学习变得更简单高效 Built for Stable Diffusion, ComfyUI, and NovelAI. Search a vast library of images and prompts with one click. Reference top-tier examples to streamline your workflow and master AI art faster. [COMFYUI]跑步[149148566]" />
+    <meta name="twitter:image" content="https://ai-img.10118899.xyz/ComfyUI/77268706/149148566_p0.webp" />
+    <meta data-seo="end" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
+	    <link rel="stylesheet" href="/styles.css?v=260727c" />
+    <link rel="stylesheet" href="/ai_metadata.css?v=260731c" />
+  </head>
+  <body>
+  <header class="site-header">
+    <h1><a id="homeLink" class="logo-link" href="/"><img src="/favicon.ico" alt="AI TAG Prompt Art Gallery" /></a></h1>
+    <div class="search-row">
+        <input id="q" type="text" placeholder="Search: work ID / author ID or name / caption / tags / date / AI type / model (supports -exclude, OR, and quoted exact match)" />
+        <input id="prompt" type="text" placeholder="Search: NAI & SD AI metadata prompt (no negative / no ComfyUI)" />
+        <select id="sortMode" aria-label="Sort">
+          <option value="new">Newest</option>
+          <option value="monthly">Monthly ranking</option>
+        </select>
+        <select id="timeRange" aria-label="Time range">
+          <option value="all">All time</option>
+        </select>
+        <button id="searchBtn">Search</button>
+      </div>
+      <div class="blocklist-row">
+        <input id="blacklist" type="text" placeholder="Block keywords (comma/space separated; does not block AI metadata)" />
+        <button id="saveBlacklistBtn">Save blocklist</button>
+      </div>
+    </header>
+
+    <main>
+      <section id="hero-intro" class="hero-intro">
+        <h2 id="heroTitle" class="hero-title">AI TAG Prompt Art Gallery</h2>
+        <div class="hero-desc">
+          <p id="heroDescription">Built for Stable Diffusion, ComfyUI, and NovelAI. Search a vast library of images and prompts with one click.</p>
+        </div>
+        <div id="heroAnnouncement" class="hero-announcement hidden">
+          <p id="heroAnnouncementText"></p>
+        </div>
+        <div class="hero-lang-switch">
+          <a href="/?lang=zh" class="lang-link" data-lang="zh">中文</a>
+          <span class="divider">·</span>
+          <a href="/?lang=us" class="lang-link" data-lang="en">English</a>
+        </div>
+      </section>
+      <!-- 搜索状态条：位于搜索栏下方与作品卡片上方之间 -->
+      <div id="searchStatus" class="search-status">
+        <div class="spinner" aria-hidden="true"></div>
+        <span>Searching…</span>
+      </div>
+      <section id="gallery" class="gallery-grid"></section>
+      <div id="noResult" class="no-result">No results</div>
+      <div id="pagination" class="pagination"></div>
+      <div id="loading" class="loading">Loading…</div>
+      <!-- 手动兜底：当自动加载失败时可点击加载更多（无限模式下显示） -->
+      <div class="load-more-row">
+        <button id="loadMoreBtn" class="load-more-btn hidden">Load more</button>
+      </div>
+
+      <!-- 右下角页面/设置控件（半透明设置形状，页数居中） -->
+      <button id="fcChip" class="float-ctrl fc-chip" aria-label="Settings & page">
+        <span class="fc-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" focusable="false" aria-hidden="true">
+            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z"></path>
+            <circle cx="12" cy="12" r="3"></circle>
+          </svg>
+        </span>
+        <span id="fcNum" class="fc-num">1</span>
+      </button>
+
+      <!-- 浮层：跳页输入 -->
+      <div id="fcPanel" class="fc-panel hidden" aria-label="Jump settings">
+        <div class="fc-search-row">
+          <div class="fc-line">
+            <input id="fcQ" type="text" placeholder="Search: ID / author ID or name / caption / tags / date / type / model" />
+          </div>
+          <div class="fc-line">
+            <input id="fcPrompt" type="text" placeholder="Search: NAI/SD metadata prompt" />
+            <button id="fcSearchBtn" class="btn">Search</button>
+          </div>
+        </div>
+        <div class="fc-blocklist-row">
+          <input id="fcBlacklist" type="text" placeholder="Block keywords (comma/space separated)" />
+          <button id="fcSaveBlacklistBtn" class="btn outline">Save blocklist</button>
+        </div>
+        <div class="fc-divider"></div>
+        <div class="fc-jump-row">
+          <label class="fc-label" for="fcInput">Go to</label>
+          <input id="fcInput" class="fc-input" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-bwignore="true" data-lpignore="true" data-1p-ignore placeholder="Page" />
+          <button id="fcGo" class="btn">Go</button>
+        </div>
+        <div class="fc-language-row">
+          <label class="fc-label" for="fcLanguageSelect">UI language</label>
+          <select id="fcLanguageSelect" class="fc-language-select">
+            <option value="auto">Automatic (browser)</option>
+            <option value="zh">简体中文</option>
+            <option value="zh_tw">繁體中文</option>
+            <option value="en">English</option>
+            <option value="ja">日本語</option>
+            <option value="ko">한국어</option>
+          </select>
+        </div>
+        <label class="fc-switch" for="openWorkNewWindowToggle">
+          <span class="fc-switch-text">Open works in a new window</span>
+          <input id="openWorkNewWindowToggle" class="fc-switch-input" type="checkbox" />
+          <span class="fc-switch-track" aria-hidden="true"><span class="fc-switch-thumb"></span></span>
+        </label>
+        <label class="fc-switch" for="showSuspectInvalidTagToggle">
+          <span class="fc-switch-text" data-i18n="show_suspect_invalid_tags">显示疑似无效TAG作品</span>
+          <input id="showSuspectInvalidTagToggle" class="fc-switch-input" type="checkbox" autocomplete="off" />
+          <span class="fc-switch-track" aria-hidden="true"><span class="fc-switch-thumb"></span></span>
+        </label>
+        <label class="fc-switch" for="showNaixInvalidTagToggle">
+          <span class="fc-switch-text" data-i18n="show_naix_invalid_tags">显示NAI_X无效TAG作品</span>
+          <input id="showNaixInvalidTagToggle" class="fc-switch-input" type="checkbox" autocomplete="off" />
+          <span class="fc-switch-track" aria-hidden="true"><span class="fc-switch-thumb"></span></span>
+        </label>
+        <label class="fc-switch" for="showR18Toggle">
+          <span class="fc-switch-text" data-i18n="show_r18">显示 R-18 作品</span>
+          <input id="showR18Toggle" class="fc-switch-input" type="checkbox" autocomplete="off" />
+          <span class="fc-switch-track" aria-hidden="true"><span class="fc-switch-thumb"></span></span>
+        </label>
+        <label class="fc-switch" for="cardPreviewToggle">
+          <span class="fc-switch-text" data-i18n="show_card_preview">显示卡片预览窗口</span>
+          <input id="cardPreviewToggle" class="fc-switch-input" type="checkbox" autocomplete="off" />
+          <span class="fc-switch-track" aria-hidden="true"><span class="fc-switch-thumb"></span></span>
+        </label>
+        <div class="fc-divider"></div>
+        <div id="fcExtraSettings" class="fc-extra-settings"></div>
+      </div>
+
+      <!-- 悬浮预览面板（跟随鼠标所在作品，自动在左/右侧显示） -->
+      <div id="hoverPreview" class="hover-preview hidden">
+        <div class="hp-header">
+          <div id="hpTitle" class="hp-title"></div>
+          <div id="hpCount" class="hp-count"></div>
+        </div>
+        <img id="hpImage" class="hp-image" alt="Preview" />
+      </div>
+
+      <div id="detailView" class="detail-view hidden">
+        <div class="detail-header">
+          <button id="backBtn" class="back-btn">← Back</button>
+          <h2 id="detailTitle">Work details</h2>
+        </div>
+        <div id="detailMeta" class="detail-meta"></div>
+      <div id="detailImages" class="detail-images"></div>
+      </div>
+      <div id="announceOverlay" class="announce-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="announceTitle">
+        <div id="announceModal" class="announce-modal">
+          <h2 id="announceTitle" class="announce-title">Announcement</h2>
+          <div class="announce-content">
+            <p>This site collects Pixiv AI works that include AI metadata.</p>
+            <p>The goal is to help beginners learn faster and make it easier to study good prompts and settings.</p>
+            <p>I also often share my own works with group friends. Since 2024, I have been paying $25/month for a NovelAI account to run an AI bot for group friends to use for free.</p>
+            <p>I also understand the effort creators put into making their works.</p>
+            <p class="announce-strong">If you do not want your works to be public, you can message me on Pixiv anytime to have them removed: <a href="https://www.pixiv.net/messages.php?receiver_id=120618272" target="_blank" rel="noopener noreferrer">Message me on Pixiv (Puid:120618272)</a></p>
+          </div>
+          <div class="announce-actions">
+            <button id="announceClose" class="btn">Close</button>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script src="/ui_i18n.js?v=260830d"></script>
+    <script src="/tag_translations.js?v=260727a"></script>
+    <script src="/nai.js?v=260821a"></script>
+    <script src="/nai_x.js?v=260825a"></script>
+    <script src="/ai_metadata_ruleset.js?v=260821a"></script>
+    <script src="/ai_metadata_view.js?v=260731c"></script>
+    <script src="/sensitive_filter.js?v=260830a"></script>
+	    <script src="/app.js?v=260831a"></script>
+  <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a34264b91bad1ff3',t:'MTc4ODI0NTk3OQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
