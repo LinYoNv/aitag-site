@@ -10,6 +10,7 @@ interface UserInfo {
   username: string;
   role: string;
   author_name: string;
+  avatar?: string;
 }
 
 interface FileEntry {
@@ -281,7 +282,11 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
         </Link>
         <span className="text-sm text-[#aeb6c2]">上传作品</span>
         <div className="ml-auto">
-          <UserBadge username={user.username} isAdmin={user.role === "admin"} />
+          <UserBadge
+            username={user.username}
+            isAdmin={user.role === "admin"}
+            avatar={user.avatar}
+          />
         </div>
       </header>
 

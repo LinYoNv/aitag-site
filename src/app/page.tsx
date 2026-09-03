@@ -11,6 +11,7 @@ export default async function Home() {
         username: user.username,
         role: user.role,
         author_name: user.author_name,
+        avatar: user.avatar,
       }}
     />
   );

@@ -38,6 +38,7 @@ db.exec(`
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'user',
     author_name TEXT NOT NULL DEFAULT '',
+    avatar TEXT NOT NULL DEFAULT '',
     create_date TEXT NOT NULL
   );
 `);

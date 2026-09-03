@@ -9,6 +9,7 @@ interface UserInfo {
   username: string;
   role: string;
   author_name: string;
+  avatar?: string;
 }
 
 export default function GalleryPage({ user }: { user: UserInfo }) {
@@ -88,7 +89,11 @@ export default function GalleryPage({ user }: { user: UserInfo }) {
         >
           + 上传
         </a>
-        <UserBadge username={user.username} isAdmin={user.role === "admin"} />
+        <UserBadge
+          username={user.username}
+          isAdmin={user.role === "admin"}
+          avatar={user.avatar}
+        />
       </header>
 
       <main className="py-4">

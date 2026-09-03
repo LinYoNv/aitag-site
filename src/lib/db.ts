@@ -41,6 +41,7 @@ export function getDb(): DatabaseSync {
         password_hash TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT 'user',   -- 'admin' | 'user'
         author_name TEXT NOT NULL DEFAULT '',
+        avatar TEXT NOT NULL DEFAULT '',      -- 头像 URL（空 = 默认图标）
         create_date TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS sessions (
@@ -51,6 +52,13 @@ export function getDb(): DatabaseSync {
       );
       CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
     `);
+    // 兼容已存在的 users 表（旧库没有 avatar 列）
+    const cols = db
+      .prepare(`PRAGMA table_info(users)`)
+      .all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === "avatar")) {
+      db.exec(`ALTER TABLE users ADD COLUMN avatar TEXT NOT NULL DEFAULT ''`);
+    }
   }
   return db;
 }
@@ -223,6 +231,7 @@ export interface UserRow {
   password_hash: string;
   role: "admin" | "user";
   author_name: string;
+  avatar: string;
   create_date: string;
 }
 
@@ -232,19 +241,26 @@ export function createUser(user: {
   password_hash: string;
   role?: "admin" | "user";
   author_name?: string;
+  avatar?: string;
 }): void {
   const d = getDb();
   d.prepare(
-    `INSERT OR IGNORE INTO users (id, username, password_hash, role, author_name, create_date)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO users (id, username, password_hash, role, author_name, avatar, create_date)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     user.id,
     user.username,
     user.password_hash,
     user.role ?? "user",
     user.author_name || user.username,
+    user.avatar ?? "",
     new Date().toISOString(),
   );
+}
+
+export function updateAvatar(userId: string, avatarUrl: string): void {
+  const d = getDb();
+  d.prepare(`UPDATE users SET avatar = ? WHERE id = ?`).run(avatarUrl, userId);
 }
 
 export function getUserByUsername(username: string): UserRow | null {
