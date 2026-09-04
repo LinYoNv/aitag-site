@@ -22,7 +22,8 @@ export function extractArtistsFromPrompt(prompt: string): ArtistTag[] {
     const openBraces = m[2] ?? "";
     const name = (m[3] ?? "").trim();
     const closeBraces = m[4] ?? "";
-    if (!name) continue;
+    // 过滤伪 artist：质量词引导（artist: '20::best quality）等非画师名
+    if (!name || name.startsWith("'") || name.startsWith("`")) continue;
     let weight = rawWeight !== undefined && rawWeight !== "" ? Number.parseFloat(rawWeight) : 1;
     if (Number.isNaN(weight)) weight = 1;
     const key = name.toLowerCase();
