@@ -9,6 +9,47 @@ interface Props {
   index?: number;
 }
 
+// 画师条目（与 lib/types ArtistTag 一致）
+interface ArtistTag {
+  name: string;
+  weight: number;
+  raw?: string;
+}
+
+// 画师区块：展示提取出的 artist 列表（负向权重用删除线/标注，花括号权重保留原文）
+function ArtistBlock({ artists }: { artists: ArtistTag[] }) {
+  if (!artists || artists.length === 0) return null;
+  return (
+    <div className="mb-2">
+      <div className="text-[11px] font-semibold text-[#aeb6c2] mb-1">
+        画师 Artist
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {artists.map((a) => (
+          <span
+            key={a.name}
+            className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] font-mono ${
+              a.weight < 0
+                ? "bg-[#2a1a1a] text-[#ff9a9a] border-[#5a2a2a]"
+                : "bg-[#1a2233] text-[#4c9fff] border-[#2a3a55]"
+            }`}
+            title={a.weight < 0 ? `负向权重 ${a.weight}（已抑制）` : a.raw ? `原始：${a.raw}` : `权重 ${a.weight}`}
+          >
+            <span className={a.weight < 0 ? "line-through opacity-70" : ""}>
+              {a.raw ?? a.name}
+            </span>
+            {a.weight !== 1 && (
+              <span className="text-[9px] opacity-70">
+                {a.weight < 0 ? `${a.weight}` : `×${a.weight}`}
+              </span>
+            )}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // NovelAI 参数的可读字段顺序
 const NAI_ORDER: Array<[string, string]> = [
   ["sampler", "Sampler"],
@@ -129,25 +170,31 @@ export default function CardMetaView({ data, index }: Props) {
               </div>
             ) : null
           ) : (
-            <div className="grid grid-cols-2 gap-1.5">
-              {(fmt === "comfyui" ? COMFY_ORDER : NAI_ORDER).map(([k, label]) => {
-                const v = data[k];
-                if (v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0))
-                  return null;
-                const text = Array.isArray(v) ? v.join(", ") : String(v);
-                return (
-                  <div
-                    key={k}
-                    className="bg-[#0f1218] border border-[#262b36] rounded px-2 py-1"
-                  >
-                    <div className="text-[10px] text-[#5a6270]">{label}</div>
-                    <div className="text-[11px] text-[#e6edf3] font-mono truncate">
-                      {text}
+            <>
+              <ArtistBlock
+                artists={(data.artists as ArtistTag[] | undefined) ?? []}
+              />
+              <div className="grid grid-cols-2 gap-1.5">
+                {(fmt === "comfyui" ? COMFY_ORDER : NAI_ORDER).map(([k, label]) => {
+                  if (k === "artists") return null;
+                  const v = data[k];
+                  if (v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0))
+                    return null;
+                  const text = Array.isArray(v) ? v.join(", ") : String(v);
+                  return (
+                    <div
+                      key={k}
+                      className="bg-[#0f1218] border border-[#262b36] rounded px-2 py-1"
+                    >
+                      <div className="text-[10px] text-[#5a6270]">{label}</div>
+                      <div className="text-[11px] text-[#e6edf3] font-mono truncate">
+                        {text}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            </>
           )}
         </>
       )}

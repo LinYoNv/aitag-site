@@ -332,9 +332,9 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
   const isManual = tab === "manual";
   const isComfy = tab === "comfyui";
 
-  // 画师数组 <-> 可编辑字符串
+  // 画师数组 <-> 可编辑字符串（优先回显原始权重表达，保留花括号）
   const artistsToText = (arr: ArtistTag[]): string =>
-    arr.map((a) => (a.weight === 1 ? a.name : `${a.weight}::artist:${a.name}`)).join(", ");
+    arr.map((a) => a.raw ?? (a.weight === 1 ? a.name : `${a.weight}::artist:${a.name}`)).join(", ");
   const artistsFromText = (text: string): ArtistTag[] =>
     extractArtistsFromPrompt(text);
 
@@ -482,7 +482,7 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
                                     : "bg-[#1a2233] text-[#4c9fff] border-[#2a3a55]"
                                 }`}
                               >
-                                {a.name}
+                                {a.raw ?? a.name}
                                 {a.weight !== 1 && (
                                   <span className="ml-1 opacity-70">×{a.weight}</span>
                                 )}

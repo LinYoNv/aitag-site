@@ -66,6 +66,7 @@ function PromptBlock({ label, value }: { label: string; value: string }) {
 interface ArtistTag {
   name: string;
   weight: number;
+  raw?: string;
 }
 function ArtistBlock({ artists }: { artists: ArtistTag[] }) {
   if (!artists || artists.length === 0) return null;
@@ -83,9 +84,11 @@ function ArtistBlock({ artists }: { artists: ArtistTag[] }) {
                 ? "bg-[#2a1a1a] text-[#ff9a9a] border-[#5a2a2a]"
                 : "bg-[#1a2233] text-[#4c9fff] border-[#2a3a55]"
             }`}
-            title={a.weight < 0 ? `负向权重 ${a.weight}（已抑制）` : `权重 ${a.weight}`}
+            title={a.weight < 0 ? `负向权重 ${a.weight}（已抑制）` : a.raw ? `原始：${a.raw}` : `权重 ${a.weight}`}
           >
-            <span className={a.weight < 0 ? "line-through opacity-70" : ""}>{a.name}</span>
+            <span className={a.weight < 0 ? "line-through opacity-70" : ""}>
+              {a.raw ?? a.name}
+            </span>
             {a.weight !== 1 && (
               <span className="text-[10px] opacity-70">
                 {a.weight < 0 ? `${a.weight}` : `×${a.weight}`}

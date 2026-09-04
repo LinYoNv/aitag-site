@@ -5,8 +5,10 @@ export type AiType = "sd" | "nai" | "nai_x" | "comfyui" | "other";
 // NAI 画师条目（从 prompt 提取）
 export interface ArtistTag {
   name: string;
-  /** 权重（无权重前缀时为 1；负向为负数） */
+  /** 数值权重（无权重前缀时为 1；负向为负数；花括号权重时仍为 1） */
   weight: number;
+  /** 原始权重表达（如 `{{{{artist:asanagi}}}}`、`1.4::artist:nueegochi ::`），用于忠实展示 */
+  raw?: string;
 }
 
 // ---- NovelAI 参数 ----

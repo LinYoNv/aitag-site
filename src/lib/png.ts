@@ -4,28 +4,36 @@
 import type { NovelAiMetadata, ComfyUiMetadata, PngParseResult, ArtistTag } from "./types";
 
 // 从 NovelAI prompt 文本中提取画师（artist）列表
-// 支持两种格式：
-//   新格式（V3/V4 权重）：`1.4::artist:nueegochi ::, -2::artist:collaboration::`
-//   旧格式（纯前缀）：   `artist:ningen_mame,, ...`（仅可靠的 artist: 前缀项）
-// 返回 [{ name, weight }]，保持出现顺序，负向权重也保留。
+// 支持三种格式：
+//   数值权重：`1.4::artist:nueegochi ::` 或 `-2::artist:collaboration::`
+//   花括号强调：`{{{{artist:asanagi}}}}`（花括号层数=权重，保留 raw 原文）
+//   纯前缀：`artist:ningen_mame`（仅可靠的 artist: 前缀项）
+// 返回 [{ name, weight, raw }]，保持出现顺序，负向权重也保留。
 export function extractArtistsFromPrompt(prompt: string): ArtistTag[] {
   if (!prompt) return [];
   const out: ArtistTag[] = [];
   const seen = new Set<string>();
-  const re = /(?:(?:(-?\d*\.?\d+)\s*::)\s*)?artist\s*:\s*([^,\n;]+)/gi;
+  // 三种前缀：可选数值权重 N.ND:: / 可选左花括号 {n} / 无前缀；
+  // artist: 大小写不敏感；名字贪婪匹配，遇 { } , ; : 或换行即停
+  const re = /(?:(?:(-?\d*\.?\d+)\s*::)\s*)?(\{*)\s*artist\s*:\s*([^{},;:\n]+)\s*(\}*)(?:\s*::)?/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(prompt)) !== null) {
     const rawWeight = m[1];
-    let name = (m[2] ?? "").trim();
-    // 去掉新格式尾部的 "::" / " ::," 残留
-    name = name.replace(/\s*::\s*$/, "").trim();
+    const openBraces = m[2] ?? "";
+    let name = (m[3] ?? "").trim();
+    const closeBraces = m[4] ?? "";
     if (!name) continue;
     let weight = rawWeight !== undefined && rawWeight !== "" ? Number.parseFloat(rawWeight) : 1;
     if (Number.isNaN(weight)) weight = 1;
     const key = name.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ name, weight });
+    // 保留原始权重表达：花括号原文优先（忠实还原 `{{{{artist:x}}}}`）
+    const raw =
+      openBraces || closeBraces
+        ? `${openBraces}artist:${name}${closeBraces}`
+        : m[0].trim();
+    out.push({ name, weight, raw });
   }
   return out;
 }
