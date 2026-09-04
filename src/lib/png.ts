@@ -20,7 +20,7 @@ export function extractArtistsFromPrompt(prompt: string): ArtistTag[] {
   while ((m = re.exec(prompt)) !== null) {
     const rawWeight = m[1];
     const openBraces = m[2] ?? "";
-    let name = (m[3] ?? "").trim();
+    const name = (m[3] ?? "").trim();
     const closeBraces = m[4] ?? "";
     if (!name) continue;
     let weight = rawWeight !== undefined && rawWeight !== "" ? Number.parseFloat(rawWeight) : 1;
