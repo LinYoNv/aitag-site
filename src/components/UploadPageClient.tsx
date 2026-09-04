@@ -2,8 +2,8 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
-import { parsePngMetadata, parseComfyUi } from "@/lib/png";
-import type { PngParseResult } from "@/lib/types";
+import { parsePngMetadata, parseComfyUi, extractArtistsFromPrompt } from "@/lib/png";
+import type { PngParseResult, ArtistTag } from "@/lib/types";
 import UserBadge from "@/components/UserBadge";
 
 type UploadMode = "nai" | "comfyui" | "manual";
@@ -33,6 +33,8 @@ interface FileEntry {
   model: string;
   scheduler: string;
   loras: string; // 逗号分隔
+  // NAI 画师列表（从 prompt 提取，可编辑）
+  artists: ArtistTag[];
   // ComfyUI 手动粘贴的 workflow JSON
   comfyRaw: string;
   // 是否成功解析出结构化参数
@@ -55,6 +57,7 @@ const empty = (): Omit<FileEntry, "file" | "url" | "parseResult"> => ({
   scheduler: "",
   loras: "",
   comfyRaw: "",
+  artists: [],
   parsed: false,
   hasComfy: false,
   hasNai: false,
@@ -158,6 +161,8 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
             entry.width = String(res.novelai.width || "");
             entry.height = String(res.novelai.height || "");
             entry.model = res.novelai.model && res.novelai.model !== "NovelAI" ? res.novelai.model : "";
+            // 从 prompt 自动提取画师
+            entry.artists = extractArtistsFromPrompt(res.novelai.prompt);
           }
           // ComfyUI 解析结果
           if (res.ok && res.comfyui) {
@@ -254,6 +259,7 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
             seed: entry.seed ? Number(entry.seed) : null,
             noise_schedule: null,
             model: entry.model || null,
+            artists: entry.artists.length > 0 ? entry.artists : null,
           };
           // 若 PNG 自带 comment，保留完整 comment 供 JSON 视图
           const rawMeta = entry.parseResult?.metadata as
@@ -325,6 +331,12 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
 
   const isManual = tab === "manual";
   const isComfy = tab === "comfyui";
+
+  // 画师数组 <-> 可编辑字符串
+  const artistsToText = (arr: ArtistTag[]): string =>
+    arr.map((a) => (a.weight === 1 ? a.name : `${a.weight}::artist:${a.name}`)).join(", ");
+  const artistsFromText = (text: string): ArtistTag[] =>
+    extractArtistsFromPrompt(text);
 
   // 当前上传方式下的参数预览（每张图可编辑）
   function renderParamPreview() {
@@ -442,6 +454,42 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
                             应用 JSON
                           </button>
                         </div>
+                      </div>
+                    )}
+
+                    {/* NAI：画师编辑（自动提取后可修改） */}
+                    {tab === "nai" && (
+                      <div className="border-t border-[#262b36] pt-2">
+                        <label className="block text-[11px] text-[#7a8394] mb-1">
+                          画师（Artist，自动提取，可修改）
+                        </label>
+                        <input
+                          value={artistsToText(entry.artists)}
+                          onChange={(e) =>
+                            patchEntry(i, { artists: artistsFromText(e.target.value) })
+                          }
+                          placeholder="1.4::artist:nueegochi, 0.9::artist:kabi_(zcwd8845)"
+                          className="w-full bg-[#0f1218] border border-[#262b36] rounded-md px-2 py-1.5 text-xs text-[#e6edf3] font-mono outline-none focus:border-[#4c9fff]"
+                        />
+                        {entry.artists.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {entry.artists.map((a) => (
+                              <span
+                                key={a.name}
+                                className={`text-[11px] px-1.5 py-0.5 rounded border ${
+                                  a.weight < 0
+                                    ? "bg-[#2a1a1a] text-[#ff9a9a] border-[#5a2a2a] line-through"
+                                    : "bg-[#1a2233] text-[#4c9fff] border-[#2a3a55]"
+                                }`}
+                              >
+                                {a.name}
+                                {a.weight !== 1 && (
+                                  <span className="ml-1 opacity-70">×{a.weight}</span>
+                                )}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
 

@@ -2,6 +2,13 @@
 
 export type AiType = "sd" | "nai" | "nai_x" | "comfyui" | "other";
 
+// NAI 画师条目（从 prompt 提取）
+export interface ArtistTag {
+  name: string;
+  /** 权重（无权重前缀时为 1；负向为负数） */
+  weight: number;
+}
+
 // ---- NovelAI 参数 ----
 export interface NovelAiMetadata {
   prompt: string;
@@ -14,6 +21,8 @@ export interface NovelAiMetadata {
   seed: number;
   noiseSchedule: string;
   model: string;
+  /** 提取出的画师列表（可选） */
+  artists?: ArtistTag[];
   [key: string]: unknown;
 }
 
@@ -63,6 +72,8 @@ export interface PerImageMeta {
   scale?: number;
   seed?: number;
   noise_schedule?: string;
+  /** 画师列表（数组形式，详情页展示） */
+  artists?: ArtistTag[];
   [key: string]: unknown;
 }
 

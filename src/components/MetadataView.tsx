@@ -62,6 +62,42 @@ function PromptBlock({ label, value }: { label: string; value: string }) {
   );
 }
 
+// 画师区块：展示提取出的 artist 列表（负向权重用删除线/标注）
+interface ArtistTag {
+  name: string;
+  weight: number;
+}
+function ArtistBlock({ artists }: { artists: ArtistTag[] }) {
+  if (!artists || artists.length === 0) return null;
+  return (
+    <div className="mb-4">
+      <div className="text-sm font-semibold text-[#aeb6c2] mb-1">
+        画师 Artist
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {artists.map((a) => (
+          <span
+            key={a.name}
+            className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-sm font-mono ${
+              a.weight < 0
+                ? "bg-[#2a1a1a] text-[#ff9a9a] border-[#5a2a2a]"
+                : "bg-[#1a2233] text-[#4c9fff] border-[#2a3a55]"
+            }`}
+            title={a.weight < 0 ? `负向权重 ${a.weight}（已抑制）` : `权重 ${a.weight}`}
+          >
+            <span className={a.weight < 0 ? "line-through opacity-70" : ""}>{a.name}</span>
+            {a.weight !== 1 && (
+              <span className="text-[10px] opacity-70">
+                {a.weight < 0 ? `${a.weight}` : `×${a.weight}`}
+              </span>
+            )}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ParamGrid({
   data,
   order,
@@ -165,10 +201,13 @@ export default function MetadataView({ metadata, perImage }: Props) {
         <div>
           <PromptBlock label="Prompt" value={String(data?.prompt ?? "")} />
           <PromptBlock label="Negative Prompt" value={String(data?.uc ?? "")} />
+          <ArtistBlock
+            artists={(data?.artists as ArtistTag[] | undefined) ?? []}
+          />
           <ParamGrid
             data={data ?? {}}
             order={NAI_ORDER}
-            skipKeys={new Set(["prompt", "uc"])}
+            skipKeys={new Set(["prompt", "uc", "artists"])}
           />
         </div>
       )}

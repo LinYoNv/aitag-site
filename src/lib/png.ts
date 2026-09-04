@@ -1,7 +1,34 @@
 // PNG 元数据解析器 —— 浏览器端运行（纯 TS，不依赖 Node/第三方包）
 // 解析 PNG 的 tEXt chunk，提取 NovelAI 内嵌的 Comment JSON。
 
-import type { NovelAiMetadata, ComfyUiMetadata, PngParseResult } from "./types";
+import type { NovelAiMetadata, ComfyUiMetadata, PngParseResult, ArtistTag } from "./types";
+
+// 从 NovelAI prompt 文本中提取画师（artist）列表
+// 支持两种格式：
+//   新格式（V3/V4 权重）：`1.4::artist:nueegochi ::, -2::artist:collaboration::`
+//   旧格式（纯前缀）：   `artist:ningen_mame,, ...`（仅可靠的 artist: 前缀项）
+// 返回 [{ name, weight }]，保持出现顺序，负向权重也保留。
+export function extractArtistsFromPrompt(prompt: string): ArtistTag[] {
+  if (!prompt) return [];
+  const out: ArtistTag[] = [];
+  const seen = new Set<string>();
+  const re = /(?:(?:(-?\d*\.?\d+)\s*::)\s*)?artist\s*:\s*([^,\n;]+)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(prompt)) !== null) {
+    const rawWeight = m[1];
+    let name = (m[2] ?? "").trim();
+    // 去掉新格式尾部的 "::" / " ::," 残留
+    name = name.replace(/\s*::\s*$/, "").trim();
+    if (!name) continue;
+    let weight = rawWeight !== undefined && rawWeight !== "" ? Number.parseFloat(rawWeight) : 1;
+    if (Number.isNaN(weight)) weight = 1;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ name, weight });
+  }
+  return out;
+}
 
 // 从 Uint8Array 解码 latin1 字符串
 function decodeLatin1(bytes: Uint8Array): string {
