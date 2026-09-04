@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import CopyButton from "@/components/CopyButton";
 
 interface Props {
   metadata: Record<string, unknown> | null;
@@ -51,51 +52,33 @@ function JsonView({ data }: { data: Record<string, unknown> }) {
   );
 }
 
-function PromptBlock({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="mb-4">
-      <div className="text-sm font-semibold text-[#aeb6c2] mb-1">{label}</div>
-      <div className="bg-[#0f1218] border border-[#262b36] rounded-lg p-3 text-sm text-[#e6edf3] whitespace-pre-wrap break-words leading-relaxed">
-        {value || <span className="text-[#5a6270]">（无）</span>}
-      </div>
-    </div>
-  );
-}
-
-// 画师区块：展示提取出的 artist 列表（负向权重用删除线/标注）
+// 画师条目（与 lib/types ArtistTag 一致）
 interface ArtistTag {
   name: string;
   weight: number;
   raw?: string;
 }
-function ArtistBlock({ artists }: { artists: ArtistTag[] }) {
-  if (!artists || artists.length === 0) return null;
+
+// 把画师列表渲染成一行可复制的文本（按出现顺序，保留权重语法）
+function artistsToText(artists: ArtistTag[]): string {
+  return artists.map((a) => a.raw ?? a.name).join(", ");
+}
+
+// 文本框：标题 + 右上角复制按钮 + 内容（Prompt / Negative / 画师 同款样式）
+function PromptBlock({ label, value }: { label: string; value: string }) {
   return (
     <div className="mb-4">
-      <div className="text-sm font-semibold text-[#aeb6c2] mb-1">
-        画师 Artist
+      <div className="flex items-center gap-2 mb-1">
+        <div className="text-sm font-semibold text-[#aeb6c2]">{label}</div>
+        <span className="ml-auto">
+          <CopyButton text={value} label="复制" />
+        </span>
+        <span className="text-xs text-[#5a6270]">
+          {value.length > 0 ? `${value.length} 字符` : "（无）"}
+        </span>
       </div>
-      <div className="flex flex-wrap gap-2">
-        {artists.map((a) => (
-          <span
-            key={a.name}
-            className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-sm font-mono ${
-              a.weight < 0
-                ? "bg-[#2a1a1a] text-[#ff9a9a] border-[#5a2a2a]"
-                : "bg-[#1a2233] text-[#4c9fff] border-[#2a3a55]"
-            }`}
-            title={a.weight < 0 ? `负向权重 ${a.weight}（已抑制）` : a.raw ? `原始：${a.raw}` : `权重 ${a.weight}`}
-          >
-            <span className={a.weight < 0 ? "line-through opacity-70" : ""}>
-              {a.raw ?? a.name}
-            </span>
-            {a.weight !== 1 && (
-              <span className="text-[10px] opacity-70">
-                {a.weight < 0 ? `${a.weight}` : `×${a.weight}`}
-              </span>
-            )}
-          </span>
-        ))}
+      <div className="bg-[#0f1218] border border-[#262b36] rounded-lg p-3 text-sm text-[#e6edf3] whitespace-pre-wrap break-words leading-relaxed">
+        {value || <span className="text-[#5a6270]">（无）</span>}
       </div>
     </div>
   );
@@ -204,8 +187,9 @@ export default function MetadataView({ metadata, perImage }: Props) {
         <div>
           <PromptBlock label="Prompt" value={String(data?.prompt ?? "")} />
           <PromptBlock label="Negative Prompt" value={String(data?.uc ?? "")} />
-          <ArtistBlock
-            artists={(data?.artists as ArtistTag[] | undefined) ?? []}
+          <PromptBlock
+            label="画师 Artist"
+            value={artistsToText((data?.artists as ArtistTag[] | undefined) ?? [])}
           />
           <ParamGrid
             data={data ?? {}}

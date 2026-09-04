@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import CopyButton from "@/components/CopyButton";
 
 interface Props {
   /** 单张图对应的参数对象（per_image 项或整个 metadata） */
@@ -16,38 +17,9 @@ interface ArtistTag {
   raw?: string;
 }
 
-// 画师区块：展示提取出的 artist 列表（负向权重用删除线/标注，花括号权重保留原文）
-function ArtistBlock({ artists }: { artists: ArtistTag[] }) {
-  if (!artists || artists.length === 0) return null;
-  return (
-    <div className="mb-2">
-      <div className="text-[11px] font-semibold text-[#aeb6c2] mb-1">
-        画师 Artist
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        {artists.map((a) => (
-          <span
-            key={a.name}
-            className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] font-mono ${
-              a.weight < 0
-                ? "bg-[#2a1a1a] text-[#ff9a9a] border-[#5a2a2a]"
-                : "bg-[#1a2233] text-[#4c9fff] border-[#2a3a55]"
-            }`}
-            title={a.weight < 0 ? `负向权重 ${a.weight}（已抑制）` : a.raw ? `原始：${a.raw}` : `权重 ${a.weight}`}
-          >
-            <span className={a.weight < 0 ? "line-through opacity-70" : ""}>
-              {a.raw ?? a.name}
-            </span>
-            {a.weight !== 1 && (
-              <span className="text-[9px] opacity-70">
-                {a.weight < 0 ? `${a.weight}` : `×${a.weight}`}
-              </span>
-            )}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
+// 把画师列表渲染成一行可复制的文本（按出现顺序，保留权重语法）
+function artistsToText(artists: ArtistTag[]): string {
+  return artists.map((a) => a.raw ?? a.name).join(", ");
 }
 
 // NovelAI 参数的可读字段顺序
@@ -81,6 +53,41 @@ const COMFY_ORDER: Array<[string, string]> = [
   ["height", "Height"],
 ];
 
+// 可折叠文本框：标题 + 右上角复制按钮 + 内容（与 Prompt/Negative 同款样式）
+function CopyableBox({
+  title,
+  text,
+  maxH,
+  countColor = "#4c9fff",
+}: {
+  title: string;
+  text: string;
+  maxH: string;
+  countColor?: string;
+}) {
+  return (
+    <details className="mb-2 group" open>
+      <summary className="cursor-pointer text-xs font-semibold text-[#aeb6c2] hover:text-[#e6edf3] list-none flex items-center gap-1">
+        <span className="text-[10px] text-[#5a6270] group-open:rotate-90 inline-block transition-transform">
+          ▶
+        </span>
+        {title}
+        <span className="ml-auto">
+          <CopyButton text={text} label="复制" />
+        </span>
+        <span className="text-[10px] font-normal" style={{ color: countColor }}>
+          {text.length > 0 ? `${text.length} 字符` : "（无）"}
+        </span>
+      </summary>
+      <div
+        className={`mt-1 bg-[#0f1218] border border-[#262b36] rounded p-2 text-[11px] text-[#e6edf3] whitespace-pre-wrap break-words leading-relaxed overflow-auto ${maxH}`}
+      >
+        {text || <span className="text-[#5a6270]">（无）</span>}
+      </div>
+    </details>
+  );
+}
+
 export default function CardMetaView({ data, index }: Props) {
   const [view, setView] = useState<"formatted" | "json">("formatted");
 
@@ -92,6 +99,11 @@ export default function CardMetaView({ data, index }: Props) {
       : data._format === "manual"
         ? "manual"
         : "nai";
+
+  const promptText = String(data.prompt ?? "");
+  const negativeText = String(data.uc ?? "");
+  const artists = (data.artists as ArtistTag[] | undefined) ?? [];
+  const artistsText = artistsToText(artists);
 
   return (
     <div className="p-3 border-t border-[#262b36]">
@@ -132,69 +144,59 @@ export default function CardMetaView({ data, index }: Props) {
         </pre>
       ) : (
         <>
-          {/* Prompt && Negative 折叠块（NAI / ComfyUI / manual 共用） */}
-          {(data.prompt || data.uc) && (
-            <>
-              <details className="mb-2 group" open>
-                <summary className="cursor-pointer text-xs font-semibold text-[#aeb6c2] hover:text-[#e6edf3] list-none flex items-center gap-1">
-                  <span className="text-[10px] text-[#5a6270] group-open:rotate-90 inline-block transition-transform">▶</span>
-                  Prompt
-                  <span className="ml-auto text-[10px] text-[#4c9fff] font-normal">
-                    {String(data.prompt ?? "").length > 0 ? `${String(data.prompt).length} 字符` : "（无）"}
-                  </span>
-                </summary>
-                <div className="mt-1 bg-[#0f1218] border border-[#262b36] rounded p-2 text-[11px] text-[#e6edf3] whitespace-pre-wrap break-words leading-relaxed max-h-48 overflow-auto">
-                  {String(data.prompt ?? "") || <span className="text-[#5a6270]">（无）</span>}
-                </div>
-              </details>
-
-              <details className="mb-2 group" open>
-                <summary className="cursor-pointer text-xs font-semibold text-[#aeb6c2] hover:text-[#e6edf3] list-none flex items-center gap-1">
-                  <span className="text-[10px] text-[#5a6270] group-open:rotate-90 inline-block transition-transform">▶</span>
-                  Negative Prompt
-                  <span className="ml-auto text-[10px] text-[#aeb6c2] font-normal">
-                    {String(data.uc ?? "").length > 0 ? `${String(data.uc).length} 字符` : "（无）"}
-                  </span>
-                </summary>
-                <div className="mt-1 bg-[#0f1218] border border-[#262b36] rounded p-2 text-[11px] text-[#e6edf3] whitespace-pre-wrap break-words leading-relaxed max-h-32 overflow-auto">
-                  {String(data.uc ?? "") || <span className="text-[#5a6270]">（无）</span>}
-                </div>
-              </details>
-            </>
+          {/* Prompt / Negative Prompt / 画师 文本框（NAI / ComfyUI / manual 共用） */}
+          {promptText && (
+            <CopyableBox title="Prompt" text={promptText} maxH="max-h-48" />
+          )}
+          {negativeText && (
+            <CopyableBox
+              title="Negative Prompt"
+              text={negativeText}
+              maxH="max-h-32"
+              countColor="#aeb6c2"
+            />
+          )}
+          {artistsText && (
+            <CopyableBox
+              title="画师 Artist"
+              text={artistsText}
+              maxH="max-h-32"
+              countColor="#4c9fff"
+            />
           )}
 
           {fmt === "manual" ? (
-            !data.prompt && !data.uc ? (
+            !promptText && !negativeText ? (
               <div className="text-[11px] text-[#aeb6c2]">
                 该图片无结构化参数，可切换到 JSON 查看原始内容。
               </div>
             ) : null
           ) : (
-            <>
-              <ArtistBlock
-                artists={(data.artists as ArtistTag[] | undefined) ?? []}
-              />
-              <div className="grid grid-cols-2 gap-1.5">
-                {(fmt === "comfyui" ? COMFY_ORDER : NAI_ORDER).map(([k, label]) => {
-                  if (k === "artists") return null;
-                  const v = data[k];
-                  if (v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0))
-                    return null;
-                  const text = Array.isArray(v) ? v.join(", ") : String(v);
-                  return (
-                    <div
-                      key={k}
-                      className="bg-[#0f1218] border border-[#262b36] rounded px-2 py-1"
-                    >
-                      <div className="text-[10px] text-[#5a6270]">{label}</div>
-                      <div className="text-[11px] text-[#e6edf3] font-mono truncate">
-                        {text}
-                      </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {(fmt === "comfyui" ? COMFY_ORDER : NAI_ORDER).map(([k, label]) => {
+                if (k === "artists") return null;
+                const v = data[k];
+                if (
+                  v === undefined ||
+                  v === null ||
+                  v === "" ||
+                  (Array.isArray(v) && v.length === 0)
+                )
+                  return null;
+                const text = Array.isArray(v) ? v.join(", ") : String(v);
+                return (
+                  <div
+                    key={k}
+                    className="bg-[#0f1218] border border-[#262b36] rounded px-2 py-1"
+                  >
+                    <div className="text-[10px] text-[#5a6270]">{label}</div>
+                    <div className="text-[11px] text-[#e6edf3] font-mono truncate">
+                      {text}
                     </div>
-                  );
-                })}
-              </div>
-            </>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </>
       )}
