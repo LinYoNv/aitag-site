@@ -124,6 +124,8 @@ function mergeServerMeta(
     out.scale = fm.scale ?? n.scale ?? null;
     out.seed = fm.seed || n.seed || null;
     out.noise_schedule = fm.noise_schedule ?? n.noiseSchedule ?? null;
+    // CFG Rescale（NAI 的 cfg_rescale，如 1.5）——后端权威，前端编辑兜底
+    out.cfg_rescale = fm.cfg_rescale ?? n.cfg_rescale ?? null;
     out.model = fm.model || n.model || null;
     // 画师：后端从权威 prompt 提取（前端可能没提/提错）
     const serverArtists = extractArtistsFromPrompt(String(out.prompt || ""));

@@ -34,7 +34,7 @@ const NAI_ORDER: Array<[string, string]> = [
   ["sm", "SM"],
   ["sm_dyn", "SM Dyn"],
   ["dynamic_thresholding", "Dynamic Thresholding"],
-  ["cfg_rescale", "CFG Rescale"],
+  ["cfg_rescale", "cfg"],
   ["uncond_scale", "Uncond Scale"],
   ["version", "Version"],
   ["request_type", "Request Type"],

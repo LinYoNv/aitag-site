@@ -263,6 +263,22 @@ function recalcNai(m, texts) {
   // 画师：从权威 prompt 提取
   const artists = extractArtistsFromPrompt(prompt);
   out.artists = artists.length > 0 ? artists : (m.artists ?? null);
+  // cfg_rescale：从 Comment JSON 提取（老数据缺字段时补全；已存在则保留）
+  if (out.cfg_rescale === undefined || out.cfg_rescale === null) {
+    try {
+      const commentObj = typeof texts.Comment === "string" ? JSON.parse(texts.Comment) : null;
+      if (
+        commentObj &&
+        typeof commentObj === "object" &&
+        commentObj.cfg_rescale !== undefined &&
+        commentObj.cfg_rescale !== null
+      ) {
+        out.cfg_rescale = Number(commentObj.cfg_rescale);
+      }
+    } catch {
+      // Comment 不是 JSON 时忽略
+    }
+  }
   // _raw 存档（Comment 原文）
   const raw = buildRawStore(texts, texts.Comment ?? null, null);
   if (raw) out._raw = { ...(m._raw ?? {}), ...raw };
@@ -315,7 +331,12 @@ try {
         if (fmt === "comfyui" && p?.rawJson) {
           np = recalcComfy(p, String(p.rawJson));
         } else if (fmt === "nai" || fmt === "nai_x") {
-          np = recalcNai(p, { Comment: String(p?.comment ?? "") });
+          const c = p?.comment;
+          const commentText =
+            typeof c === "string" ? c
+            : c && typeof c === "object" ? JSON.stringify(c)
+            : "";
+          np = recalcNai(p, { Comment: commentText });
         }
         if (JSON.stringify(np) !== JSON.stringify(p)) dirty = true;
         return np;
@@ -336,10 +357,12 @@ try {
       const workflow = String(m.rawJson ?? m._raw?.workflow ?? "");
       newMeta = recalcComfy(m, workflow);
     } else if (fmt === "nai" || fmt === "nai_x") {
-      const commentRaw = typeof m.comment === "string" ? m.comment
-        : m.comment && typeof m.comment === "object" ? JSON.stringify(m.comment)
-        : m._raw?.comment && typeof m._raw.comment === "string" ? m._raw.comment : "";
-      newMeta = recalcNai(m, { Comment: commentRaw || String(m.prompt ?? "") });
+      const c = m.comment ?? m._raw?.comment;
+      const commentText =
+        typeof c === "string" ? c
+        : c && typeof c === "object" ? JSON.stringify(c)
+        : "";
+      newMeta = recalcNai(m, { Comment: commentText });
     } else {
       // other/manual：不动
       skipped++;

@@ -110,6 +110,10 @@ function normalizeNovelAi(comment: Record<string, unknown>): NovelAiMetadata {
         (comment as Record<string, unknown>).version ??
         "NovelAI",
     ),
+    // CFG Rescale（NAI 的 CFG 重缩放比例，如 1.5）——有值才带，避免显示 0
+    ...(comment.cfg_rescale !== undefined && comment.cfg_rescale !== null
+      ? { cfg_rescale: Number(comment.cfg_rescale) }
+      : {}),
   };
 }
 
