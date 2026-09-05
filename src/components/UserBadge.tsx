@@ -103,7 +103,7 @@ export default function UserBadge({ username, isAdmin, avatar }: Props) {
           {/* 菜单项 */}
           <div className="py-1.5">
             <Link
-              href="/profile"
+              href={`/u/${encodeURIComponent(username)}`}
               onClick={() => setOpen(false)}
               className="flex items-center gap-2.5 px-4 py-2 text-sm text-[#e6edf3] hover:bg-[#1c212b] transition-colors"
             >

@@ -11,7 +11,15 @@ export default async function UserPage({
 }: {
   params: Promise<{ username: string }>;
 }) {
-  const { username } = await params;
+  const { username: rawUsername } = await params;
+  // Next 路由对中文路径参数可能不自动解码（/u/空雨 → %E7%A9%BA%E9%9B%A8），
+  // 这里统一解码：已解码的中文 decodeURIComponent 原样返回，不会抛错
+  let username = rawUsername;
+  try {
+    username = decodeURIComponent(rawUsername);
+  } catch {
+    // 保持原值
+  }
   // 登录拦截（主页需登录才能访问，返回值仅用于权限校验）
   await requireLogin();
   const user = getUserByUsername(username);
