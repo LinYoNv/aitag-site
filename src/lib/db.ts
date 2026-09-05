@@ -61,6 +61,15 @@ export function getDb(): DatabaseSync {
         PRIMARY KEY (user_id, work_id, action)
       );
       CREATE INDEX IF NOT EXISTS idx_user_actions_work ON user_actions(work_id);
+
+      -- 浏览量记录（同用户同作品在时间窗口内去重，防刷新刷量）
+      CREATE TABLE IF NOT EXISTS view_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        work_id TEXT NOT NULL,
+        create_date TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_view_logs_user_work ON view_logs(user_id, work_id, create_date);
     `);
     // 兼容已存在的 works 表（旧库没有 total_likes 列）
     const wcols = db
@@ -133,11 +142,26 @@ export function insertWork(work: Work): void {
   );
 }
 
-// 浏览量 +1，返回最新值
-export function incrementView(id: string): number {
+// 浏览量 +1（时间窗口去重：同用户同作品在 windowMs 内只计一次，防刷新刷量）
+// 返回最新值。窗口内重复访问返回 null 表示未计入。
+export function recordView(userId: string, workId: string, windowMs = 10 * 60 * 1000): number | null {
   const d = getDb();
-  d.prepare("UPDATE works SET total_view = total_view + 1 WHERE id = ?").run(id);
-  const row = d.prepare("SELECT total_view FROM works WHERE id = ?").get(id) as
+  const since = new Date(Date.now() - windowMs).toISOString();
+  const recent = d
+    .prepare("SELECT 1 FROM view_logs WHERE user_id = ? AND work_id = ? AND create_date > ? LIMIT 1")
+    .get(userId, workId, since);
+  if (recent) {
+    // 窗口内已看过：不计，返回当前值
+    const row = d.prepare("SELECT total_view FROM works WHERE id = ?").get(workId) as
+      | { total_view: number }
+      | undefined;
+    return Number(row?.total_view ?? 0);
+  }
+  d.prepare(
+    "INSERT INTO view_logs (user_id, work_id, create_date) VALUES (?, ?, ?)",
+  ).run(userId, workId, new Date().toISOString());
+  d.prepare("UPDATE works SET total_view = total_view + 1 WHERE id = ?").run(workId);
+  const row = d.prepare("SELECT total_view FROM works WHERE id = ?").get(workId) as
     | { total_view: number }
     | undefined;
   return Number(row?.total_view ?? 0);
