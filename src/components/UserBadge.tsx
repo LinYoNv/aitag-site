@@ -114,7 +114,21 @@ export default function UserBadge({ username, isAdmin, avatar }: Props) {
                   clipRule="evenodd"
                 />
               </svg>
-              个人资料
+              我的主页
+            </Link>
+            <Link
+              href="/profile"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2.5 px-4 py-2 text-sm text-[#e6edf3] hover:bg-[#1c212b] transition-colors"
+            >
+              <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-[#aeb6c2]">
+                <path
+                  fillRule="evenodd"
+                  d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              个人资料设置
             </Link>
             <button
               onClick={handleLogout}

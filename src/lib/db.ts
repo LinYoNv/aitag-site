@@ -229,6 +229,7 @@ export function listWorks(opts: {
   sort?: "new" | "old" | "monthly" | "bookmarks";
   ai_type?: string;
   time_range?: string;
+  author?: string;
   page?: number;
   page_size?: number;
 }): PagedWorks {
@@ -254,6 +255,11 @@ export function listWorks(opts: {
   if (opts.ai_type && ["sd", "nai", "nai_x", "comfyui", "other"].includes(opts.ai_type)) {
     where.push("ai_type = ?");
     params.push(opts.ai_type);
+  }
+  // 作者过滤（用户主页）：author_name 精确匹配用户名
+  if (opts.author) {
+    where.push("author_name = ?");
+    params.push(opts.author);
   }
 
   const whereSql = where.length ? "WHERE " + where.join(" AND ") : "";
@@ -304,6 +310,84 @@ export function listWorks(opts: {
     page_size,
     total,
     total_pages: Math.ceil(total / page_size),
+  };
+}
+
+// 用户主页统计：作品数 / 获赞总数 / 被收藏总数 / 总浏览
+export function getUserStats(
+  authorName: string,
+): { work_count: number; total_likes: number; total_bookmarks: number; total_views: number } {
+  const d = getDb();
+  const row = d
+    .prepare(
+      `SELECT
+         COUNT(*) AS work_count,
+         COALESCE(SUM(total_likes), 0) AS total_likes,
+         COALESCE(SUM(total_bookmarks), 0) AS total_bookmarks,
+         COALESCE(SUM(total_view), 0) AS total_views
+       FROM works WHERE author_name = ?`,
+    )
+    .get(authorName) as
+    | { work_count: number; total_likes: number; total_bookmarks: number; total_views: number }
+    | undefined;
+  return {
+    work_count: Number(row?.work_count ?? 0),
+    total_likes: Number(row?.total_likes ?? 0),
+    total_bookmarks: Number(row?.total_bookmarks ?? 0),
+    total_views: Number(row?.total_views ?? 0),
+  };
+}
+
+// 用户收藏过的作品（user_actions 里 bookmark 的记录，关联 works）
+export function listBookmarkedWorks(
+  userId: string,
+  page = 1,
+  page_size = 24,
+): PagedWorks {
+  const d = getDb();
+  const page2 = Math.max(1, page);
+  const size = Math.min(50, Math.max(1, page_size));
+  const total =
+    (
+      d
+        .prepare(
+          `SELECT COUNT(*) AS c FROM user_actions
+           JOIN works ON works.id = user_actions.work_id
+           WHERE user_actions.user_id = ? AND user_actions.action = 'bookmark'`,
+        )
+        .get(userId) as { c: number }
+    ).c ?? 0;
+  const rows = d
+    .prepare(
+      `SELECT works.* FROM user_actions
+       JOIN works ON works.id = user_actions.work_id
+       WHERE user_actions.user_id = ? AND user_actions.action = 'bookmark'
+       ORDER BY user_actions.create_date DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .all(userId, size, (page2 - 1) * size) as Record<string, unknown>[];
+  const items: WorkListItem[] = rows.map((r) => {
+    const w = rowToWork(r);
+    return {
+      id: w.id,
+      title: w.title,
+      caption: w.caption,
+      create_date: w.create_date,
+      ai_type: w.ai_type,
+      image_count: w.image_count,
+      tags: w.tags,
+      author_name: w.author_name,
+      total_view: w.total_view,
+      total_bookmarks: w.total_bookmarks,
+      cover: w.images[0] ?? "",
+    };
+  });
+  return {
+    items,
+    page: page2,
+    page_size: size,
+    total,
+    total_pages: Math.ceil(total / size),
   };
 }
 

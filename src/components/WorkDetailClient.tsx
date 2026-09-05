@@ -168,7 +168,13 @@ export default function WorkDetailClient({ work, canDelete, isAdmin }: Props) {
               {work.title || work.id}
             </h1>
             <div className="text-sm text-[#aeb6c2] mt-1">
-              {work.author_name} · {formatDate(work.create_date)}
+              <Link
+                href={`/u/${encodeURIComponent(work.author_name)}`}
+                className="hover:text-[#4c9fff]"
+              >
+                {work.author_name}
+              </Link>
+              {" · "}{formatDate(work.create_date)}
               {multi && (
                 <span className="ml-2 text-[#4c9fff]">
                   {images.length} 张图
