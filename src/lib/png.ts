@@ -127,11 +127,45 @@ export function parseComfyUi(metadata: string | null): ComfyUiMetadata | null {
 
   const entries = Object.entries(graph);
 
-  // 取引用的节点文本（["nodeId", idx] 引用形式）
+  // 递归解析节点文本：支持 Anima 自定义节点组合
+  //  - CLIPTextEncode.text 引用 JoinStringMulti / CR Prompt Text 等
+  //  - JoinStringMulti：拼接所有 string_N
+  //  - CR Prompt Text：读 prompt 字段
+  //  - ShowText|pysssss：读 text_0 字段
+  const resolveNodeText = (nodeId: string, depth = 0): string => {
+    if (depth > 6) return "";
+    const n = graph[nodeId];
+    if (!n) return "";
+    const t = n.class_type ?? "";
+    const inputs = (n.inputs ?? {}) as Record<string, unknown>;
+    // JoinStringMulti：拼接所有 string_N
+    if (t.includes("JoinString") || t.includes("StringMulti")) {
+      const parts: string[] = [];
+      const delim = typeof inputs.delimiter === "string" ? inputs.delimiter : "";
+      for (let i = 1; i <= 30; i++) {
+        const v = inputs[`string_${i}`];
+        if (v === undefined) break;
+        if (Array.isArray(v) && typeof v[0] === "string") parts.push(resolveNodeText(v[0], depth + 1));
+        else if (typeof v === "string") parts.push(v);
+      }
+      return parts.filter(Boolean).join(delim);
+    }
+    // CR Prompt Text：读 prompt 字段
+    if (typeof inputs.prompt === "string") return inputs.prompt;
+    // 普通文本节点：text / text_0
+    if (typeof inputs.text === "string") return inputs.text;
+    if (typeof inputs.text_0 === "string") return inputs.text_0;
+    // text 是引用
+    if (Array.isArray(inputs.text) && typeof inputs.text[0] === "string") {
+      return resolveNodeText(inputs.text[0], depth + 1);
+    }
+    return "";
+  };
+
+  // 取引用的节点文本（["nodeId", idx] 引用形式，递归解析）
   const getTextByRef = (ref: unknown): string => {
     if (Array.isArray(ref) && typeof ref[0] === "string") {
-      const n = graph[ref[0]];
-      if (n && typeof n.inputs?.text === "string") return n.inputs.text;
+      return resolveNodeText(ref[0]);
     }
     return "";
   };
