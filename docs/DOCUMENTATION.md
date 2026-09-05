@@ -2,7 +2,7 @@
 
 > 本文档描述项目**当前实际状态**（与源码一致），是功能/文件/API 的权威参考。
 > 配套文档：`HANDOFF.md`（部署交接）、`ENVIRONMENT-NOTES.md`（环境备忘）、`login-register-progress.md`（登录注册线进度）。
-> 最后更新：2026-09-03
+> 最后更新：2026-09-05
 
 ---
 
@@ -79,10 +79,13 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 | 整站门控 | 未登录访问任何页面 → 307 跳 `/login` | 全局 |
 | 画廊 | 栅格展示 + 搜索（ID/作者/标签/参数）+ 排序（最新/月榜）+ 分页 + 悬浮预览 | `/` |
 | 作品详情 | 多图 Grid 卡片，每图参数一体，JSON 视图 | `/i/[id]` |
+| 互动 | 点赞(👍)/收藏(⭐)/浏览量(👁)；浏览量 10 分钟窗口去重（同用户同作品不重复计数） | 详情页 |
 | 上传 | 3 种方式（NAI/ComfyUI/无参数），上传时可编辑完整参数 | `/upload` |
 | 删除作品 | 管理员删全部；作者删自己的；顺带删图片文件 | 详情页按钮 |
-| 头像下拉菜单 | 头部最右圆形头像（可上传/默认图标），点击弹出【个人资料】【登出】；**黄色「管理员」徽标仅 admin 可见** | 头部 |
-| 个人资料 | 更换头像（PNG/JPG/WebP ≤2MB）+ 用户名/角色/昵称/注册时间 | `/profile` |
+| 头像下拉菜单 | 头部最右圆形头像（可上传/默认图标），点击弹出【我的主页】【个人资料设置】【登出】；**黄色「管理员」徽标仅 admin 可见** | 头部 |
+| 个人资料 | 更换头像（PNG/JPG/WebP ≤2MB）+ 用户名/角色/昵称/注册时间 + **API Token 管理** | `/profile` |
+| 用户主页 | 参照 Pixiv：头像/用户名/管理员徽章/注册时间资料卡 + 统计行（作品/点赞/收藏/浏览）+ **作品\|收藏 Tab 滑块** | `/u/[username]` |
+| API Token | 账号绑定凭证，供外部插件走接口上传鉴权；明文只显示一次，库里存 SHA-256 哈希；可重新生成（旧的立即失效） | `/profile` |
 | 站点配置 | `/api/config` 返回站点名、语言、上传开关 | API |
 
 **上传 3 种方式（2026-09-03 精简）**：
@@ -94,7 +97,7 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 **权限规则**：
 - `requireLogin()`（`src/lib/guard.ts`）：未登录 `redirect('/login')` —— 所有页面 + 部分 API
 - `/api/works`（列表）**不要求登录**（页面层已门控，可接受）
-- `/api/upload`：必须登录，作者=登录用户名（忽略表单 author_name）
+- `/api/upload`：**session 或 API Token 二选一**，作者=账号（session=登录用户名；token=绑定账号，忽略表单 author_name）
 - `DELETE /api/works/[id]`：admin 可删全部；否则 `author_name === username` 才可删，越权 403
 
 ---
@@ -110,6 +113,8 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 | GET | `/api/me` | 登录 | — | 200 `{ok,user}`；401 `{ok:false,user:null}` |
 | POST | `/api/logout` | 登录 | — | 200 `{ok:true}`（清 session+cookie） |
 | POST | `/api/me/avatar` | 登录 | multipart `avatar` 文件（PNG/JPG/WebP ≤2MB） | 200 `{ok,avatar:"/api/avatars/..."}`；400/401/500 |
+| GET | `/api/me/token` | 登录 | — | 200 `{ok,hasToken:boolean}`（**不返回明文**） |
+| POST | `/api/me/token` | 登录 | — | 200 `{ok,token}`（生成/重置，明文仅此一次；旧 token 立即失效） |
 
 `user` 序列化（`safeUser`）字段：`id, username, role("admin"|"user"), author_name, avatar, create_date`（**不含密码哈希**）。
 
@@ -117,12 +122,25 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 
 | 方法 | 路径 | 权限 | 参数 | 返回 |
 |---|---|---|---|---|
-| GET | `/api/works` | 公开 | `q`（标题/简介/作者/ID/标签模糊）、`prompt`（metadata 模糊）、`sort`（new\|monthly）、`page`、`page_size`(≤50) | `{items,page,page_size,total,total_pages}`；item 含 `cover=images[0]` |
-| GET | `/api/works/[id]` | 登录 | — | 200 Work；401 未登录；404 不存在 |
+| GET | `/api/works` | 公开 | `q`（标题/简介/作者/ID/标签模糊）、`prompt`（metadata 模糊）、`sort`（new\|monthly\|bookmarks）、`page`、`page_size`(≤50) | `{items,page,page_size,total,total_pages}`；item 含 `cover=images[0]` |
+| GET | `/api/works/[id]` | 登录 | — | 200 Work（含 `user_liked`/`user_bookmarked` 当前用户状态）；401 未登录；404 不存在 |
+| POST | `/api/works/[id]/view` | 登录 | — | 200 `{ok,views}`（10 分钟窗口去重，窗口内不 +1） |
+| POST | `/api/works/[id]/action` | 登录 | JSON `{action:"like"\|"bookmark"}` | 200 `{ok,active,count}`（幂等 toggle） |
 | DELETE | `/api/works/[id]` | 登录+权限 | — | 200 `{ok}`；401/403/404/500；删除时清对应图片文件 |
 | GET | `/api/config` | 公开 | — | `{site_name,image_prefix,languages,default_language,upload_enabled}` |
 
-**Work 字段**：`id, title, caption, create_date, ai_type(sd|nai|nai_x|comfyui|other), image_count, tags[], author_name, total_view, total_bookmarks, images[], metadata`
+**Work 字段**：`id, title, caption, create_date, ai_type(sd|nai|nai_x|comfyui|other), image_count, tags[], author_name, total_view, total_bookmarks, total_likes, images[], metadata`（详情响应另含 `user_liked`/`user_bookmarked`）。
+
+**API Token 上传**（外部插件，2026-09-05）：
+- 复用 `POST /api/upload`，请求头 `Authorization: Bearer <token>`（无 session 时按 token 认用户；带 session 时 session 优先）
+- 请求体与网页一致：`multipart/form-data`，`files`（可多个 PNG/JPG/WebP）、`title`/`caption` 可选
+- 作者 = token 绑定账号；成功 `201 {ok:true, ids:[...], count:N}`；token 无效 `401 {error:"请先登录"}`
+- 示例：
+  ```bash
+  curl -X POST https://juocho.kdns.fr/api/upload \
+    -H "Authorization: Bearer <token>" \
+    -F "files=@作品.png"
+  ```
 
 ### 4.3 文件服务
 
@@ -139,7 +157,8 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 | `/login` `/register` | 动态 | 已登录访问则 redirect `/` |
 | `/upload` | 动态 | 上传页（requireLogin） |
 | `/i/[id]` | 动态 | 详情页（requireLogin + canDelete/isAdmin） |
-| `/profile` | 动态 | 个人资料（requireLogin） |
+| `/profile` | 动态 | 个人资料（requireLogin）：换头像 + 信息 + API Token |
+| `/u/[username]` | 动态 | 用户主页（requireLogin，参照 Pixiv）：资料卡 + 统计 + 作品\|收藏 Tab |
 
 ---
 
@@ -154,8 +173,8 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 | ai_type | TEXT | sd/nai/nai_x/comfyui/other |
 | image_count | INTEGER | 图数 |
 | tags | TEXT(JSON) | 标签数组 |
-| author_name | TEXT | 作者（默认「群友」；上传=登录用户名） |
-| total_view / total_bookmarks | INTEGER | 浏览/收藏数 |
+| author_name | TEXT | 作者（上传=账号用户名/昵称） |
+| total_view / total_bookmarks / total_likes | INTEGER | 浏览/收藏/点赞数 |
 | images | TEXT(JSON) | 图片 URL 数组（`/api/images/...` 或 `/images/works/...`） |
 | metadata | TEXT(JSON) | 生成参数 |
 
@@ -180,6 +199,25 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 | author_name | TEXT | 昵称 |
 | avatar | TEXT | 头像 URL（`/api/avatars/...`，空=默认图标） |
 | create_date | TEXT | ISO |
+| api_token_hash | TEXT | API Token 的 SHA-256 哈希（**不存明文**；空=未生成） |
+
+### user_actions（点赞/收藏记录）
+| 字段 | 说明 |
+|---|---|
+| user_id / work_id | 联合主键 (user_id, work_id, action) |
+| action | `like` \| `bookmark` |
+| create_date | ISO |
+
+`toggleAction()` 幂等：已存在→删除并计数 -1；不存在→插入并 +1。`getUserActionState()` 返回当前用户对作品的 `{liked, bookmarked}`。
+
+### view_logs（浏览量去重）
+| 字段 | 说明 |
+|---|---|
+| id | INTEGER PK AUTOINCREMENT |
+| user_id / work_id | 浏览者与作品 |
+| create_date | ISO |
+
+`recordView()`：同用户同作品 **10 分钟窗口内** 不重复 +1（防刷新刷量）。
 
 ### sessions
 | 字段 | 说明 |
@@ -204,40 +242,46 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 | `upload/page.tsx` | 上传页：requireLogin → `<UploadPageClient user={...}>` |
 | `i/[id]/page.tsx` | 详情页：requireLogin + 算 canDelete/isAdmin → `<WorkDetailClient>` |
 | `profile/page.tsx` | 个人资料：requireLogin → `<ProfileClient>` |
+| `u/[username]/page.tsx` | 用户主页：requireLogin + getUserByUsername（**decodeURIComponent 解码中文用户名**）→ `<UserPageClient>`（资料卡+统计+作品/收藏） |
 
 ### API 路由（`src/app/api/`）
 | 文件 | 用途 |
 |---|---|
 | `login/route.ts` `register/route.ts` `me/route.ts` `logout/route.ts` | 认证 4 件套（见 §4.1） |
 | `me/avatar/route.ts` | 上传头像（multipart，校验类型/大小，存 `data/avatars/`，更新 users.avatar） |
+| `me/token/route.ts` | API Token：GET 查 `{hasToken}`（不返回明文）/ POST 生成重置 `{token}`（明文一次） |
 | `avatars/[name]/route.ts` | 服务头像文件 |
-| `works/route.ts` | 作品列表+搜索+分页 |
+| `works/route.ts` | 作品列表+搜索+分页（支持 author 过滤） |
 | `works/[id]/route.ts` | 详情 GET / 删除 DELETE（权限） |
-| `upload/route.ts` | 上传作品（多图、合并/独立、作者=登录用户） |
+| `works/[id]/view/route.ts` | 记录浏览（10 分钟去重） |
+| `works/[id]/action/route.ts` | 点赞/收藏 toggle（幂等） |
+| `upload/route.ts` | 上传作品（多图、合并/独立、作者=账号；**session 或 Bearer token 鉴权**） |
 | `images/[name]/route.ts` | 服务上传图（data/uploads + legacy public/images/uploads 回退） |
 | `config/route.ts` | 站点配置 |
 
 ### 库（`src/lib/`）
 | 文件 | 用途 |
 |---|---|
-| `db.ts` | SQLite 数据层：works CRUD/搜索/分页、users/sessions 增删查、getDb() 自动建表 + 兼容旧表 ALTER |
+| `db.ts` | SQLite 数据层：works CRUD/搜索/分页（listWorks 支持 q/prompt/ai_type/author/sort）、users/sessions 增删查、**点赞/收藏 toggle、浏览量去重、API Token 生成/校验/查询**、getDb() 自动建表 + 兼容旧表 ALTER |
 | `auth.ts` | 认证：scrypt 哈希/校验、registerUser、login/logout/currentUser（cookie 会话）、ensureAdmin（未调用）、safeUser |
 | `guard.ts` | `requireLogin()` 页面级登录保护 |
 | `types.ts` | 共享类型：Work/WorkListItem/PagedWorks/PerImageMeta/PngParseResult + `getPerImageMetas()` |
 | `format.ts` | ai_type 标签、日期格式化 |
-| `png.ts` | **浏览器端** PNG tEXt chunk 解析（NovelAI Comment JSON） |
+| `png.ts` | PNG tEXt chunk 解析：NovelAI Comment JSON + **画师(artist)提取** + **ComfyUI workflow 解析**（resolveNodeText 递归、JoinStringMulti/CR Prompt Text/ShowText 等自定义节点、unet_name 底模） |
 
 ### 组件（`src/components/`）
 | 文件 | 用途 |
 |---|---|
 | `GalleryPage.tsx` | 画廊页（client）：搜索/排序/分页/栅格 + 头部（含 UserBadge） |
 | `GalleryCard.tsx` | 画廊卡片 |
-| `WorkDetailClient.tsx` | 详情页（client）：多图 Grid + 每图参数 + 删除按钮 |
+| `WorkDetailClient.tsx` | 详情页（client）：多图 Grid + 每图参数 + 点赞/收藏/浏览 + 删除按钮 + 作者名跳转用户主页 |
 | `CardMetaView.tsx` `MetadataView.tsx` | 参数展示视图（卡片式 / JSON） |
+| `CopyButton.tsx` | 复制按钮（Prompt/Negative/画师 三框共用） |
 | `UploadPageClient.tsx` | 上传页（client）：拖拽/多图/PNG 解析/共用标题 |
 | `LoginForm.tsx` `RegisterForm.tsx` | 登录/注册表单（client） |
-| `UserBadge.tsx` | **头像下拉菜单**：圆形头像（有图显示/无则 SVG 人形默认）、管理员金色徽标（仅 admin）、点击弹出【个人资料】【登出】、点外部关闭、`ml-auto` 贴最右 |
-| `ProfileClient.tsx` | 个人资料页（client）：换头像 + 信息展示 |
+| `UserBadge.tsx` | **头像下拉菜单**：圆形头像（有图显示/无则 SVG 人形默认）、管理员金色徽标（仅 admin）、点击弹出【我的主页】【个人资料设置】【登出】、点外部关闭、`ml-auto` 贴最右 |
+| `ProfileClient.tsx` | 个人资料页（client）：换头像 + 信息展示 + **API Token 生成/复制/重新生成** |
+| `UserPageClient.tsx` | 用户主页（client）：资料卡 + 统计行 + 作品\|收藏 Tab 滑块（GalleryCard 网格） |
 
 ### 脚本（`scripts/`）
 | 文件 | 用途 |
@@ -255,17 +299,19 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 4. **上传图片路径**：新上传存 `data/uploads/`（运行时数据，避免 Next 静态缓存）；`/api/images/[name]` 服务之，并回退旧路径 `public/images/uploads/`。种子图在 `public/images/works/`（静态）。
 5. **删除作品**：按 `author_name === username` 判定作者；admin 全权；删除时尽力删除对应图片文件。
 6. **头像**：`data/avatars/`；上传后 `users.avatar` 存 `/api/avatars/<file>`；前端无头像时渲染内置 SVG 人形（`DefaultAvatar`，深色底+人形剪影，无需外网）。
-7. **兼容旧库**：`getDb()` 建表后用 `PRAGMA table_info(users)` 检查，缺 `avatar` 列则 `ALTER TABLE ADD COLUMN`（老库平滑升级）。
-8. **.gitignore**：`/public/images/`、`/data/`、`/.next/`、`/node_modules/` 均忽略——**只提交源码**，图片与数据库不提交，迁移时单独处理。
-9. **月榜**：`/api/works?sort=monthly` 按 `total_bookmarks DESC, total_view DESC` 排序（页面下拉里有「月榜」选项）。
-10. **已知废弃**：中英切换、独立月榜页 = 废案（用户拍板不做）。
+7. **兼容旧库**：`getDb()` 建表后用 `PRAGMA table_info(users)` 检查，缺列则 `ALTER TABLE ADD COLUMN`（老库平滑升级：avatar → api_token_hash）。**惰性迁移：部署后需触发一次真实 API 请求**（如 `GET /api/works?page=1`）否则新表/新列不生效。
+8. **API Token 安全**：库里只存 SHA-256 哈希（`hashApiToken`），明文仅生成时返回一次；`getUserByApiToken` 用哈希反查用户；重置即覆盖哈希（旧 token 立即失效）。上传接口 session 优先、token 兜底。
+9. **中文用户名路由**：Next 对中文路径参数（`/u/空雨` → `%E7%A9%BA%E9%9B%A8`）**不自动解码**，页面里须手动 `decodeURIComponent`（已解码的中文调用会原样返回，幂等安全）。
+10. **.gitignore**：`/public/images/`、`/data/`、`/.next/`、`/node_modules/` 均忽略——**只提交源码**，图片与数据库不提交，迁移时单独处理。
+11. **月榜**：`/api/works?sort=monthly` 按 `total_bookmarks DESC, total_view DESC` 排序（页面下拉里有「月榜」选项）。
+12. **已知废弃**：中英切换、独立月榜页 = 废案（用户拍板不做）。
 
 ---
 
 ## 8. 账号与环境
 
 - **admin**：用户名 `admin`，密码存容器 `/root/dsh-work/.admin-cred.tmp`（chmod 600，内容 `ADMIN_PASS=<pass>`）；2号机生产库已有该账号（role=admin）。
-- **2号机 DB**：`/root/aitag-deploy/data/aitag.db`（13 条作品，含群友上传）。
+- **2号机 DB**：`/root/aitag-deploy/data/aitag.db`（23 条作品，admin 名下 13 条；含 users/sessions/user_actions/view_logs 表）。
 - **GitHub**：`https://github.com/LinYoNv/aitag-site`，分支 `main`；凭据走 `credential.helper=store --file=/tmp/.git-cred-ok`（容器内）。
 - **API 测试小抄**（2号机本机）：注册→登录→me→上传→登出，见 `login-register-progress.md` §自测。
 
@@ -273,6 +319,6 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 
 ## 9. 待办 / 路线（留档）
 
-1. （后续）用户/作者详情页：参考 Serika.art（`/user/[username]` + `/api/users/[id]`），用 `works.author_name` 按作者聚合作品（`WHERE author_name=? ORDER BY create_date DESC`）。调研详见 `login-register-progress.md` §7.5。
+1. ~~（后续）用户/作者详情页~~ → **已完成 2026-09-05**：`/u/[username]` 参照 Pixiv 布局（资料卡+统计+作品|收藏 Tab），入口在 UserBadge「我的主页」与详情页作者名链接。
 2. （可选）头像从下拉菜单直接上传（目前入口在 `/profile`）。
-3. （可选）作品详情页作者名链接到作者页（配合待办 1）。
+3. （可选）作品详情页作者名链接到作者页 → **已完成**（`WorkDetailClient` 作者名 → `/u/[username]`）。
