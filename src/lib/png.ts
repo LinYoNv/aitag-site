@@ -136,7 +136,32 @@ export function parseComfyUi(metadata: string | null): ComfyUiMetadata | null {
     return "";
   };
 
-  // 采样器 / 生成节点
+  // 取数字：直接数值，或跟随 ["nodeId", idx] 引用解析目标节点输入
+  const getNumByRef = (ref: unknown): number => {
+    if (typeof ref === "number") return ref;
+    if (typeof ref === "string") {
+      const n = Number(ref);
+      return Number.isNaN(n) ? 0 : n;
+    }
+    if (Array.isArray(ref) && typeof ref[0] === "string") {
+      const n = graph[ref[0]];
+      const idx = Number(ref[1] ?? 0);
+      if (!n?.inputs) return 0;
+      // 目标节点输入：取对应下标或第一个数值/文本
+      const vals = Object.values(n.inputs);
+      const v = vals[idx] ?? vals[0];
+      if (typeof v === "number") return v;
+      if (typeof v === "string") {
+        const n2 = Number(v);
+        return Number.isNaN(n2) ? 0 : n2;
+      }
+      // 再深一层（可能继续引用）
+      if (Array.isArray(v)) return getNumByRef(v);
+    }
+    return 0;
+  };
+
+  // 采样器节点：标准名或 class_type 含 KSampler/Sampler 的自定义节点
   let samplerNode:
     | { class_type?: string; inputs?: Record<string, unknown> }
     | undefined;
@@ -146,10 +171,29 @@ export function parseComfyUi(metadata: string | null): ComfyUiMetadata | null {
       t === "KSampler" ||
       t === "KSamplerAdvanced" ||
       t === "SamplerCustom" ||
-      t === "SamplerCustomAdvanced"
+      t === "SamplerCustomAdvanced" ||
+      t.includes("KSampler") ||
+      t.includes("SamplerCustom")
     ) {
       samplerNode = n;
       break;
+    }
+  }
+  // 兜底：有 seed/steps/cfg/sampler_name 且引用了 positive/negative 的节点
+  if (!samplerNode) {
+    for (const [, n] of entries) {
+      const inputs = (n?.inputs ?? {}) as Record<string, unknown>;
+      if (
+        inputs.positive !== undefined &&
+        inputs.negative !== undefined &&
+        (inputs.seed !== undefined ||
+          inputs.steps !== undefined ||
+          inputs.cfg !== undefined ||
+          inputs.sampler_name !== undefined)
+      ) {
+        samplerNode = n;
+        break;
+      }
     }
   }
 
@@ -162,26 +206,31 @@ export function parseComfyUi(metadata: string | null): ComfyUiMetadata | null {
         (samplerNode.inputs as Record<string, unknown> | undefined)?.negative_cond,
     );
   }
-  // 兜底：取任一 CLIPTextEncode 的 text
-  if (!positive) {
-    for (const [, n] of entries) {
-      if (n?.class_type === "CLIPTextEncode" && typeof n.inputs?.text === "string") {
-        positive = n.inputs.text;
-        break;
-      }
-    }
-  }
-  if (!negative) {
+  // 兜底：取任一 CLIPTextEncode 的 text，按负面特征词区分正反
+  if (!positive && !negative) {
+    const texts: string[] = [];
     for (const [, n] of entries) {
       if (
         (n?.class_type === "CLIPTextEncode" ||
           n?.class_type === "CLIPTextEncodeAdvanced") &&
-        typeof n.inputs?.text === "string" &&
-        n.inputs.text !== positive
+        typeof n.inputs?.text === "string"
       ) {
-        negative = n.inputs.text;
-        break;
+        texts.push(n.inputs.text);
       }
+    }
+    // 负面特征词命中较多的归 negative
+    const NEG_PATTERN =
+      /worst quality|low quality|score_[0-9]|bad anatomy|bad hands|deformed|jpeg artifacts|blurry|ugly|watermark|signature|extra (fingers|arms|legs|digit)/i;
+    const negTexts = texts.filter((t) => NEG_PATTERN.test(t));
+    if (negTexts.length > 0 && negTexts.length < texts.length) {
+      negative = negTexts[0];
+      positive = texts.find((t) => t !== negative) ?? "";
+    } else if (texts.length >= 2) {
+      // 无法用特征判断：第一个当 positive，第二个当 negative
+      positive = texts[0];
+      negative = texts[1];
+    } else if (texts.length === 1) {
+      positive = texts[0];
     }
   }
 
@@ -193,24 +242,31 @@ export function parseComfyUi(metadata: string | null): ComfyUiMetadata | null {
   const scheduler = String(
     (samplerNode?.inputs as Record<string, unknown> | undefined)?.scheduler ?? "",
   );
-  const steps = Number((samplerNode?.inputs as Record<string, unknown> | undefined)?.steps ?? 0);
-  const cfg = Number((samplerNode?.inputs as Record<string, unknown> | undefined)?.cfg ?? 0);
-  const seed = Number((samplerNode?.inputs as Record<string, unknown> | undefined)?.seed ?? 0);
+  const steps = getNumByRef(
+    (samplerNode?.inputs as Record<string, unknown> | undefined)?.steps,
+  );
+  const cfg = getNumByRef(
+    (samplerNode?.inputs as Record<string, unknown> | undefined)?.cfg,
+  );
+  const seed = getNumByRef(
+    (samplerNode?.inputs as Record<string, unknown> | undefined)?.seed,
+  );
 
-  // 底模（checkpoint / unet）
+  // 底模（checkpoint / unet / vae），兼容 unet_name 与 ckpt_name
   let model = "";
   for (const [, n] of entries) {
     const t = n?.class_type ?? "";
+    const inputs = (n.inputs ?? {}) as Record<string, unknown>;
     if (
       (t.includes("Checkpoint") || t.includes("UNET") || t.includes("VAE")) &&
-      typeof (n.inputs as Record<string, unknown> | undefined)?.ckpt_name === "string"
+      (typeof inputs.ckpt_name === "string" || typeof inputs.unet_name === "string")
     ) {
-      model = String((n.inputs as Record<string, unknown>).ckpt_name);
+      model = String(inputs.ckpt_name ?? inputs.unet_name ?? "");
       break;
     }
   }
 
-  // LoRA（可多个）
+  // LoRA（可多个，含 LoraLoaderModelOnly）
   const loras: string[] = [];
   for (const [, n] of entries) {
     const t = n?.class_type ?? "";
@@ -219,13 +275,13 @@ export function parseComfyUi(metadata: string | null): ComfyUiMetadata | null {
     }
   }
 
-  // 尺寸（EmptyLatentImage）
+  // 尺寸（EmptyLatentImage，支持引用解析）
   let width = 0;
   let height = 0;
   for (const [, n] of entries) {
     if (n?.class_type === "EmptyLatentImage") {
-      width = Number((n.inputs as Record<string, unknown> | undefined)?.width ?? 0);
-      height = Number((n.inputs as Record<string, unknown> | undefined)?.height ?? 0);
+      width = getNumByRef((n.inputs as Record<string, unknown> | undefined)?.width);
+      height = getNumByRef((n.inputs as Record<string, unknown> | undefined)?.height);
       if (width && height) break;
     }
   }
