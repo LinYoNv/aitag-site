@@ -181,15 +181,33 @@ a {
   align-items: start;
 }
 
+/* 单图：放大居中显示（参照 aitag.win） */
+.detail-images.single {
+  grid-template-columns: 1fr;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.detail-images.single .img-card > img {
+  max-height: 85vh;
+}
+
 @media (max-width: 1200px) {
   .detail-images {
     grid-template-columns: repeat(2, 1fr);
+  }
+  .detail-images.single {
+    grid-template-columns: 1fr;
+    max-width: 640px;
   }
 }
 
 @media (max-width: 800px) {
   .detail-images {
     grid-template-columns: 1fr;
+  }
+  .detail-images.single {
+    max-width: 100%;
   }
 }
 

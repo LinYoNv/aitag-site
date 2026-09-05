@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getWorkById } from "@/lib/db";
+import { getWorkById, getUserActionState } from "@/lib/db";
 import { requireLogin } from "@/lib/guard";
 import WorkDetailClient from "@/components/WorkDetailClient";
 
@@ -18,7 +18,14 @@ export default async function WorkDetailPage({
   // 删除权限：管理员可删全部；作者只能删自己的（按用户名匹配）
   const canDelete = user.role === "admin" || work.author_name === user.username;
 
+  // 当前用户对作品的点赞/收藏状态
+  const actionState = getUserActionState(user.id, id);
+
   return (
-    <WorkDetailClient work={work} canDelete={canDelete} isAdmin={user.role === "admin"} />
+    <WorkDetailClient
+      work={{ ...work, user_liked: actionState.liked, user_bookmarked: actionState.bookmarked }}
+      canDelete={canDelete}
+      isAdmin={user.role === "admin"}
+    />
   );
 }

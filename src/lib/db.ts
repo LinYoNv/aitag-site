@@ -51,7 +51,24 @@ export function getDb(): DatabaseSync {
         expire_date TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
+      -- 用户对作品的点赞/收藏记录（action: 'like' | 'bookmark'）
+      CREATE TABLE IF NOT EXISTS user_actions (
+        user_id TEXT NOT NULL,
+        work_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        create_date TEXT NOT NULL,
+        PRIMARY KEY (user_id, work_id, action)
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_actions_work ON user_actions(work_id);
     `);
+    // 兼容已存在的 works 表（旧库没有 total_likes 列）
+    const wcols = db
+      .prepare(`PRAGMA table_info(works)`)
+      .all() as Array<{ name: string }>;
+    if (!wcols.some((c) => c.name === "total_likes")) {
+      db.exec(`ALTER TABLE works ADD COLUMN total_likes INTEGER NOT NULL DEFAULT 0`);
+    }
     // 兼容已存在的 users 表（旧库没有 avatar 列）
     const cols = db
       .prepare(`PRAGMA table_info(users)`)
@@ -84,6 +101,7 @@ function rowToWork(row: Record<string, unknown>): Work {
     author_name: String(row.author_name ?? "群友"),
     total_view: Number(row.total_view ?? 0),
     total_bookmarks: Number(row.total_bookmarks ?? 0),
+    total_likes: Number(row.total_likes ?? 0),
     images: parseJson<string[]>(row.images as string | null, []),
     metadata: parseJson<Record<string, unknown> | null>(
       row.metadata as string | null,
@@ -96,8 +114,8 @@ export function insertWork(work: Work): void {
   const d = getDb();
   d.prepare(
     `INSERT OR REPLACE INTO works
-     (id, title, caption, create_date, ai_type, image_count, tags, author_name, total_view, total_bookmarks, images, metadata)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (id, title, caption, create_date, ai_type, image_count, tags, author_name, total_view, total_bookmarks, total_likes, images, metadata)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     work.id,
     work.title,
@@ -109,9 +127,67 @@ export function insertWork(work: Work): void {
     work.author_name,
     work.total_view,
     work.total_bookmarks,
+    work.total_likes ?? 0,
     JSON.stringify(work.images),
     work.metadata ? JSON.stringify(work.metadata) : null,
   );
+}
+
+// 浏览量 +1，返回最新值
+export function incrementView(id: string): number {
+  const d = getDb();
+  d.prepare("UPDATE works SET total_view = total_view + 1 WHERE id = ?").run(id);
+  const row = d.prepare("SELECT total_view FROM works WHERE id = ?").get(id) as
+    | { total_view: number }
+    | undefined;
+  return Number(row?.total_view ?? 0);
+}
+
+// 切换点赞/收藏（幂等 toggle）：
+// 已存在 → 取消并 -1；不存在 → 添加并 +1。返回 { active, count }
+export function toggleAction(
+  userId: string,
+  workId: string,
+  action: "like" | "bookmark",
+): { active: boolean; count: number } {
+  const d = getDb();
+  const col = action === "like" ? "total_likes" : "total_bookmarks";
+  const existing = d
+    .prepare("SELECT 1 FROM user_actions WHERE user_id = ? AND work_id = ? AND action = ?")
+    .get(userId, workId, action);
+  if (existing) {
+    d.prepare("DELETE FROM user_actions WHERE user_id = ? AND work_id = ? AND action = ?").run(
+      userId, workId, action,
+    );
+    d.prepare(`UPDATE works SET ${col} = MAX(0, ${col} - 1) WHERE id = ?`).run(workId);
+    const row = d.prepare(`SELECT ${col} AS c FROM works WHERE id = ?`).get(workId) as
+      | { c: number }
+      | undefined;
+    return { active: false, count: Number(row?.c ?? 0) };
+  }
+  d.prepare(
+    "INSERT INTO user_actions (user_id, work_id, action, create_date) VALUES (?, ?, ?, ?)",
+  ).run(userId, workId, action, new Date().toISOString());
+  d.prepare(`UPDATE works SET ${col} = ${col} + 1 WHERE id = ?`).run(workId);
+  const row = d.prepare(`SELECT ${col} AS c FROM works WHERE id = ?`).get(workId) as
+    | { c: number }
+    | undefined;
+  return { active: true, count: Number(row?.c ?? 0) };
+}
+
+// 查询某用户对某个作品的点赞/收藏状态
+export function getUserActionState(
+  userId: string,
+  workId: string,
+): { liked: boolean; bookmarked: boolean } {
+  const d = getDb();
+  const rows = d
+    .prepare("SELECT action FROM user_actions WHERE user_id = ? AND work_id = ?")
+    .all(userId, workId) as Array<{ action: string }>;
+  return {
+    liked: rows.some((r) => r.action === "like"),
+    bookmarked: rows.some((r) => r.action === "bookmark"),
+  };
 }
 
 export function getWorkById(id: string): Work | null {

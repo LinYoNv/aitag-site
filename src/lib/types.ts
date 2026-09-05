@@ -59,6 +59,11 @@ export interface Work {
   author_name: string;
   total_view: number;
   total_bookmarks: number;
+  /** 点赞数（大拇指） */
+  total_likes?: number;
+  /** 当前用户是否已点赞/已收藏（详情页展示用） */
+  user_liked?: boolean;
+  user_bookmarked?: boolean;
   images: string[];
   metadata: Record<string, unknown> | null;
 }
