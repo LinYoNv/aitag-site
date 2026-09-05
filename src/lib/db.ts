@@ -5,6 +5,7 @@ import "server-only";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import fs from "node:fs";
+import crypto from "node:crypto";
 import type { Work, WorkListItem, PagedWorks } from "./types";
 
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -84,6 +85,10 @@ export function getDb(): DatabaseSync {
       .all() as Array<{ name: string }>;
     if (!cols.some((c) => c.name === "avatar")) {
       db.exec(`ALTER TABLE users ADD COLUMN avatar TEXT NOT NULL DEFAULT ''`);
+    }
+    // 兼容已存在的 users 表（旧库没有 api_token_hash 列）
+    if (!cols.some((c) => c.name === "api_token_hash")) {
+      db.exec(`ALTER TABLE users ADD COLUMN api_token_hash TEXT NOT NULL DEFAULT ''`);
     }
   }
   return db;
@@ -426,6 +431,8 @@ export interface UserRow {
   author_name: string;
   avatar: string;
   create_date: string;
+  /** API token 的 SHA-256 哈希（不存明文） */
+  api_token_hash?: string;
 }
 
 export function createUser(user: {
@@ -454,6 +461,41 @@ export function createUser(user: {
 export function updateAvatar(userId: string, avatarUrl: string): void {
   const d = getDb();
   d.prepare(`UPDATE users SET avatar = ? WHERE id = ?`).run(avatarUrl, userId);
+}
+
+// ---- API Token（供外部插件上传鉴权，账号绑定） ----
+
+// 生成一个新的 API token（明文返回给用户，库里只存哈希）
+export function generateApiToken(userId: string): string {
+  const d = getDb();
+  const token = crypto.randomBytes(32).toString("hex"); // 64 位十六进制
+  const hash = hashApiToken(token);
+  d.prepare(`UPDATE users SET api_token_hash = ? WHERE id = ?`).run(hash, userId);
+  return token;
+}
+
+// 校验 token：匹配返回用户，否则 null
+export function getUserByApiToken(token: string): UserRow | null {
+  if (!token) return null;
+  const d = getDb();
+  const hash = hashApiToken(token);
+  const row = d.prepare("SELECT * FROM users WHERE api_token_hash = ?").get(hash) as
+    | Record<string, unknown>
+    | undefined;
+  return row ? (row as unknown as UserRow) : null;
+}
+
+// 查询某用户是否已生成过 token
+export function hasApiToken(userId: string): boolean {
+  const d = getDb();
+  const row = d.prepare("SELECT api_token_hash FROM users WHERE id = ?").get(userId) as
+    | { api_token_hash?: string }
+    | undefined;
+  return Boolean(row?.api_token_hash);
+}
+
+function hashApiToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
 }
 
 export function getUserByUsername(username: string): UserRow | null {

@@ -4,6 +4,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { insertWork } from "@/lib/db";
 import { currentUser } from "@/lib/auth";
+import { getUserByApiToken } from "@/lib/db";
 import { parsePngMetadata } from "@/lib/png";
 import { extractArtistsFromPrompt } from "@/lib/png";
 import type { Work } from "@/lib/types";
@@ -134,10 +135,23 @@ function mergeServerMeta(
   return { ...fm };
 }
 
+// 鉴权：优先 session（网页在线），无 session 时尝试 Authorization: Bearer <token>（外部插件）
+async function authUser(req: NextRequest) {
+  const sessionUser = await currentUser();
+  if (sessionUser) return sessionUser;
+  const auth = req.headers.get("authorization") ?? "";
+  const m = /^Bearer\s+(.+)$/i.exec(auth);
+  if (m) {
+    const tokenUser = getUserByApiToken(m[1].trim());
+    if (tokenUser) return tokenUser;
+  }
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   try {
-    // 必须登录才能上传，作者绑定登录账号
-    const user = await currentUser();
+    // 必须登录（session 或 API token）才能上传，作者绑定账号
+    const user = await authUser(req);
     if (!user) {
       return NextResponse.json({ error: "请先登录" }, { status: 401 });
     }
