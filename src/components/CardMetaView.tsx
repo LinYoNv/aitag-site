@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import CopyButton from "@/components/CopyButton";
-import { isArtistList } from "@/lib/png";
 
 interface Props {
   /** 单张图对应的参数对象（per_image 项或整个 metadata） */
@@ -25,6 +24,7 @@ function artistsToText(artists: ArtistTag[]): string {
 
 // NovelAI 参数的可读字段顺序
 const NAI_ORDER: Array<[string, string]> = [
+  ["model", "Model"],
   ["sampler", "Sampler"],
   ["steps", "Steps"],
   ["width", "Width"],
@@ -151,11 +151,7 @@ export default function CardMetaView({ data, index }: Props) {
           )}
           {negativeText && (
             <CopyableBox
-              title={
-                isArtistList(negativeText)
-                  ? "排除画师 Excluded Artists"
-                  : "Negative Prompt"
-              }
+              title="Negative Prompt"
               text={negativeText}
               maxH="max-h-32"
               countColor="#aeb6c2"

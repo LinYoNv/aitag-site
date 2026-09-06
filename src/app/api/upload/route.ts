@@ -127,7 +127,9 @@ function mergeServerMeta(
     out.noise_schedule = fm.noise_schedule ?? n.noiseSchedule ?? null;
     // CFG Rescale（NAI 的 cfg_rescale，如 1.5）——后端权威，前端编辑兜底
     out.cfg_rescale = fm.cfg_rescale ?? n.cfg_rescale ?? null;
-    out.model = fm.model || n.model || null;
+    // 模型：comment 里 model_name/source 优先，老图回退 PNG tEXt Source（如 "NovelAI Diffusion V4.5 4BDE2A90"）
+    const textSource = String((parseResult.metadata as Record<string, string> | null)?.["Source"] ?? "");
+    out.model = fm.model || n.model || textSource || null;
     // 画师：后端从权威 prompt 提取（前端可能没提/提错）
     const serverArtists = extractArtistsFromPrompt(String(out.prompt || ""));
     out.artists = serverArtists.length > 0 ? serverArtists : (fm.artists ?? null);

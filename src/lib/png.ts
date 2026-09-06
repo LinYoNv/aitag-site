@@ -216,11 +216,18 @@ function normalizeNovelAi(comment: Record<string, unknown>): NovelAiMetadata {
     scale: Number(comment.scale ?? 0),
     seed: Number(comment.seed ?? 0),
     noiseSchedule: String(comment.noise_schedule ?? ""),
-    model: String(
-      (comment as Record<string, unknown>).source ??
-        (comment as Record<string, unknown>).version ??
-        "NovelAI",
-    ),
+    // 模型：优先 model_name + model_hash（NAI v5 如 "NovelAI Diffusion V5 0ADF9AB7"），
+    // 其次 source（tEXt 或老格式），最后 "NovelAI"。
+    // 注意：comment.version 是协议版本号（数字 1），不是模型名，不能用作 model！
+    model: (() => {
+      const c = comment as Record<string, unknown>;
+      const name = String(c.model_name ?? "");
+      const hash = String(c.model_hash ?? "");
+      if (name) return hash ? `${name} ${hash}` : name;
+      const source = String(c.source ?? "");
+      if (source) return source;
+      return "NovelAI";
+    })(),
     // CFG Rescale（NAI 的 CFG 重缩放比例，如 1.5）——有值才带，避免显示 0
     ...(comment.cfg_rescale !== undefined && comment.cfg_rescale !== null
       ? { cfg_rescale: Number(comment.cfg_rescale) }
