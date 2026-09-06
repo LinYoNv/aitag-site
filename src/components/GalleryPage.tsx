@@ -15,6 +15,8 @@ interface UserInfo {
 export default function GalleryPage({ user }: { user: UserInfo }) {
   const [q, setQ] = useState("");
   const [input, setInput] = useState("");
+  const [blockTags, setBlockTags] = useState("");
+  const [blockInput, setBlockInput] = useState("");
   const [aiType, setAiType] = useState("all");
   const [sort, setSort] = useState<"new" | "old" | "bookmarks">("new");
   const [page, setPage] = useState(1);
@@ -28,6 +30,7 @@ export default function GalleryPage({ user }: { user: UserInfo }) {
     try {
       const params = new URLSearchParams();
       if (q) params.set("q", q);
+      if (blockTags) params.set("block_tags", blockTags);
       if (aiType && aiType !== "all") params.set("ai_type", aiType);
       params.set("sort", sort);
       params.set("page", String(page));
@@ -40,7 +43,7 @@ export default function GalleryPage({ user }: { user: UserInfo }) {
     } finally {
       setLoading(false);
     }
-  }, [q, aiType, sort, page]);
+  }, [q, blockTags, aiType, sort, page]);
 
   useEffect(() => {
     load();
@@ -54,10 +57,11 @@ export default function GalleryPage({ user }: { user: UserInfo }) {
           AI 咒语图库
         </h1>
         <form
-          className="flex-1 flex gap-2 max-w-xl max-sm:order-[100] max-sm:basis-full"
+          className="flex-1 flex gap-2 max-w-2xl max-sm:order-[100] max-sm:basis-full"
           onSubmit={(e) => {
             e.preventDefault();
             setQ(input.trim());
+            setBlockTags(blockInput.trim());
             setPage(1);
           }}
         >
@@ -67,13 +71,37 @@ export default function GalleryPage({ user }: { user: UserInfo }) {
             placeholder="搜索 作品ID/作者/标签/参数…"
             className="flex-1 min-w-0 bg-[#151922] border border-[#262b36] rounded-lg px-3 py-1.5 text-sm text-[#e6edf3] placeholder-[#5a6270] outline-none focus:border-[#4c9fff]"
           />
+          <input
+            value={blockInput}
+            onChange={(e) => setBlockInput(e.target.value)}
+            placeholder="屏蔽 tag（如 nsfw，逗号分隔）"
+            title="正向 prompt 里带这些 tag 的图将被隐藏"
+            className="w-40 max-sm:w-32 min-w-0 shrink-0 bg-[#151922] border border-[#5a2a3a] rounded-lg px-3 py-1.5 text-sm text-[#e6edf3] placeholder-[#7a5a6a] outline-none focus:border-[#ff7a9a]"
+          />
           <button
             type="submit"
-            className="bg-[#4c9fff] text-white text-sm px-4 py-1.5 rounded-lg hover:opacity-90"
+            className="bg-[#4c9fff] text-white text-sm px-4 py-1.5 rounded-lg hover:opacity-90 shrink-0"
           >
             搜索
           </button>
         </form>
+        {blockTags && (
+          <div className="w-full max-sm:order-[101] flex items-center gap-2 text-xs text-[#aeb6c2]">
+            <span>
+              已屏蔽 <span className="text-[#ff7a9a]">{blockTags}</span>
+            </span>
+            <button
+              onClick={() => {
+                setBlockTags("");
+                setBlockInput("");
+                setPage(1);
+              }}
+              className="text-[#ff7a7a] hover:underline"
+            >
+              取消屏蔽
+            </button>
+          </div>
+        )}
         <div className="flex items-center gap-2">
           {/* 类型筛选 */}
           <select

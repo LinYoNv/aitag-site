@@ -68,13 +68,18 @@ function extractFromArtistSection(prompt: string): ArtistTag[] {
   const section = prompt.slice(0, nl);
   const out: ArtistTag[] = [];
   const seen = new Set<string>();
-  for (const raw of section.split(/[,&]/)) {
+  // 只按逗号分隔（`&` 是 NAI 联合画师，如 `misaka_12003-gou & dino`，必须作为一个画师保留）
+  for (const raw of section.split(",")) {
     let p = raw.trim();
     if (!p) continue;
+    let weight = 1;
     const wm = p.match(/^(-?\d*\.?\d+)\s*::/);
     if (wm) {
       const w = Number.parseFloat(wm[1]);
-      if (!Number.isNaN(w) && w < 0) continue; // 负权重段跳过（如 -2::green ::）
+      if (!Number.isNaN(w)) {
+        if (w < 0) continue; // 负权重段跳过（如 -2::green ::）
+        weight = w; // 保留原始权重（0.9:: → 0.9）
+      }
       p = p.slice(wm[0].length).trim();
     }
     p = p.replace(/::\s*$/, "").trim();
@@ -89,21 +94,23 @@ function extractFromArtistSection(prompt: string): ArtistTag[] {
     if (p.split(/\s+/).length > 3) continue; // 超过 3 个词不像画师名
     if (seen.has(low)) continue;
     seen.add(low);
-    out.push({ name: p, weight: 1, raw: raw.trim() });
+    out.push({ name: p, weight, raw: raw.trim() });
   }
   return out;
 }
 
 // 判断文本是否纯画师列表（artist: 前缀 或 N::名字:: 加权名）。
 // 用于 uc：当 Negative Prompt 实际是一串画师名（排除画师）时，展示端按「排除画师」呈现。
+// 允许 `&`（NAI 联合画师）与中文画师名（\u4e00-\u9fff）。
 export function isArtistList(text: string | null | undefined): boolean {
   if (!text || !text.trim()) return false;
   const parts = text.split(",").map((p) => p.trim()).filter(Boolean);
   if (parts.length === 0) return false;
   for (const part of parts) {
     const p2 = part.replace(/^-?\d*\.?\d+\s*::\s*/i, "").trim(); // 去权重前缀
-    if (/^artist\s*:\s*[\w.\-\(\) ]+:*\s*$/i.test(p2)) continue; // artist:xxx / artist:xxx::
-    if (/^[\w.\-\(\) ]+::\s*$/.test(p2)) continue; // 加权名带结尾 ::
+    const nameChars = "[\\w.\\-\\(\\)& \\u4e00-\\u9fff]";
+    if (new RegExp(`^artist\\s*:\\s*${nameChars}+:*\\s*$`, "i").test(p2)) continue; // artist:xxx / artist:xxx::
+    if (new RegExp(`^${nameChars}+::\\s*$`).test(p2)) continue; // 加权名带结尾 ::
     return false;
   }
   return true;

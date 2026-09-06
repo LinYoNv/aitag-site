@@ -12,6 +12,7 @@ export async function GET(req: NextRequest) {
     ? (sortRaw as "new" | "old" | "monthly" | "bookmarks")
     : "new";
   const aiType = sp.get("ai_type") ?? undefined;
+  const blockTags = sp.get("block_tags") ?? undefined;
   const page = Number(sp.get("page") ?? "1");
   const page_size = Number(sp.get("page_size") ?? "24");
 
@@ -20,6 +21,7 @@ export async function GET(req: NextRequest) {
     prompt: prompt || undefined,
     sort,
     ai_type: aiType || undefined,
+    block_tags: blockTags || undefined,
     page: Number.isFinite(page) ? page : 1,
     page_size: Number.isFinite(page_size) ? page_size : 24,
   });

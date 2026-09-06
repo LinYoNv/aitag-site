@@ -235,6 +235,8 @@ export function listWorks(opts: {
   ai_type?: string;
   time_range?: string;
   author?: string;
+  /** 屏蔽 tag：正向 prompt 含任一该词的图排除（逗号分隔多个） */
+  block_tags?: string;
   page?: number;
   page_size?: number;
 }): PagedWorks {
@@ -255,6 +257,21 @@ export function listWorks(opts: {
   if (opts.prompt) {
     where.push("(metadata LIKE ?)");
     params.push(`%${opts.prompt}%`);
+  }
+  // 屏蔽 tag：正向 prompt（metadata 里 "prompt": 字段）含屏蔽词的排除。
+  // 匹配整个 metadata 中任意 prompt 字段（顶层 + per_image + _raw 存档），
+  // 只要有任一正向 prompt 含该词即屏蔽整作品。LIKE 对 ASCII 大小写不敏感。
+  if (opts.block_tags) {
+    const tags = opts.block_tags
+      .split(",")
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean);
+    for (const tag of tags) {
+      // 转义 LIKE 通配符，ESCAPE '\'
+      const escaped = tag.replace(/[\\%_]/g, (c) => "\\" + c);
+      where.push(`metadata NOT LIKE ? ESCAPE '\\'`);
+      params.push(`%"prompt":%${escaped}%`);
+    }
   }
   // 类型筛选：只接受明确的 ai_type 值
   if (opts.ai_type && ["sd", "nai", "nai_x", "comfyui", "other"].includes(opts.ai_type)) {

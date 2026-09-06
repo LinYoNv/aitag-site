@@ -26,6 +26,55 @@ const dryRun = process.argv.includes("--dry-run");
 
 // ============ 解析逻辑（与 src/lib/png.ts 同步） ============
 
+// 画师区里的质量/描述词黑名单（排除被误认为画师的词）
+const ARTIST_SECTION_BLACKLIST = new Set([
+  "year 2025", "year 2024", "realistic", "4k", "8k", "photorealistic",
+  "photo", "medium", "photo(medium)", "best quality", "masterpiece",
+  "very aesthetic", "highly detailed", "absurdres", "no text",
+  "textless version", "finished", "artwork", "detailed", "lively color",
+  "lively", "color", "graphic texture", "texture", "skin surface",
+  "lifelike flesh", "lifelike", "flesh", "obliques", "intricate",
+  "green", "beautiful", "style", "ultra detailed", "sharp focus",
+  "official art", "hyperdetailed", "cinematic lighting", "soft lighting",
+]);
+
+// NAI v4/v5 画师区提取：prompt 中 tag（最后一个 \n 之后的部分）之前的画师串。
+// 无 artist: 前缀，需用加权段 + 黑名单过滤；`&` 是联合画师须整体保留。
+function extractFromArtistSection(prompt) {
+  const nl = prompt.lastIndexOf("\n");
+  if (nl < 0) return [];
+  const section = prompt.slice(0, nl);
+  const out = [];
+  const seen = new Set();
+  for (const raw of section.split(",")) {
+    let p = raw.trim();
+    if (!p) continue;
+    let weight = 1;
+    const wm = p.match(/^(-?\d*\.?\d+)\s*::/);
+    if (wm) {
+      const w = Number.parseFloat(wm[1]);
+      if (!Number.isNaN(w)) {
+        if (w < 0) continue;
+        weight = w;
+      }
+      p = p.slice(wm[0].length).trim();
+    }
+    p = p.replace(/::\s*$/, "").trim();
+    if (p.length < 2 || p.length > 40) continue;
+    if (/^\d+$/.test(p)) continue;
+    if (
+      /\b(the|is|are|that|has|have|their|but|with|and|only|face|body|character|anime|style|image|drawn|finished|artwork|photo|texture|color|lively|lifelike|flesh|skin|surface|obliques|little|highly|best)\b/i.test(p)
+    ) continue;
+    const low = p.toLowerCase();
+    if (ARTIST_SECTION_BLACKLIST.has(low)) continue;
+    if (p.split(/\s+/).length > 3) continue;
+    if (seen.has(low)) continue;
+    seen.add(low);
+    out.push({ name: p, weight, raw: raw.trim() });
+  }
+  return out;
+}
+
 // 从 NovelAI prompt 提取画师
 export function extractArtistsFromPrompt(prompt) {
   if (!prompt) return [];
@@ -46,6 +95,13 @@ export function extractArtistsFromPrompt(prompt) {
     seen.add(key);
     const raw = openBraces || closeBraces ? `${openBraces}artist:${name}${closeBraces}` : m[0].trim();
     out.push({ name, weight, raw });
+  }
+  // NAI v4/v5：tag 之前（\n 分隔）的画师区是加权裸名，补充提取
+  for (const a of extractFromArtistSection(prompt)) {
+    const key = a.name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(a);
   }
   return out;
 }

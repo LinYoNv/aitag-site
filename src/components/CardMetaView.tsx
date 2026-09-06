@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import CopyButton from "@/components/CopyButton";
+import { isArtistList } from "@/lib/png";
 
 interface Props {
   /** 单张图对应的参数对象（per_image 项或整个 metadata） */
@@ -150,7 +151,11 @@ export default function CardMetaView({ data, index }: Props) {
           )}
           {negativeText && (
             <CopyableBox
-              title="Negative Prompt"
+              title={
+                isArtistList(negativeText)
+                  ? "排除画师 Excluded Artists"
+                  : "Negative Prompt"
+              }
               text={negativeText}
               maxH="max-h-32"
               countColor="#aeb6c2"
