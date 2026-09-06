@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import CopyButton from "@/components/CopyButton";
+import { isArtistList } from "@/lib/png";
 
 interface Props {
   metadata: Record<string, unknown> | null;
@@ -186,7 +187,15 @@ export default function MetadataView({ metadata, perImage }: Props) {
       ) : (
         <div>
           <PromptBlock label="Prompt" value={String(data?.prompt ?? "")} />
-          <PromptBlock label="Negative Prompt" value={String(data?.uc ?? "")} />
+          {/* uc 若是纯画师列表（NAI 把排除画师写进 uc），按「排除画师」呈现而非 Negative Prompt */}
+          <PromptBlock
+            label={
+              isArtistList(String(data?.uc ?? ""))
+                ? "排除画师 Excluded Artists"
+                : "Negative Prompt"
+            }
+            value={String(data?.uc ?? "")}
+          />
           <PromptBlock
             label="画师 Artist"
             value={artistsToText((data?.artists as ArtistTag[] | undefined) ?? [])}

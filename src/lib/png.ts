@@ -8,6 +8,7 @@ import type { NovelAiMetadata, ComfyUiMetadata, PngParseResult, ArtistTag } from
 //   数值权重：`1.4::artist:nueegochi ::` 或 `-2::artist:collaboration::`
 //   花括号强调：`{{{{artist:asanagi}}}}`（花括号层数=权重，保留 raw 原文）
 //   纯前缀：`artist:ningen_mame`（仅可靠的 artist: 前缀项）
+//   NAI v4/v5 加权画师段：`0.9::misaka_12003-gou & dino, rurudo ::`（tag 之前以 \n 分隔的画师区）
 // 返回 [{ name, weight, raw }]，保持出现顺序，负向权重也保留。
 export function extractArtistsFromPrompt(prompt: string): ArtistTag[] {
   if (!prompt) return [];
@@ -36,7 +37,76 @@ export function extractArtistsFromPrompt(prompt: string): ArtistTag[] {
         : m[0].trim();
     out.push({ name, weight, raw });
   }
+  // NAI v4/v5：tag 之前（\n 分隔）的画师区是加权裸名（无 artist: 前缀），补充提取
+  for (const a of extractFromArtistSection(prompt)) {
+    const key = a.name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(a);
+  }
   return out;
+}
+
+// 画师区里的质量/描述词黑名单（排除被误认为画师的词）
+const ARTIST_SECTION_BLACKLIST = new Set([
+  "year 2025", "year 2024", "realistic", "4k", "8k", "photorealistic",
+  "photo", "medium", "photo(medium)", "best quality", "masterpiece",
+  "very aesthetic", "highly detailed", "absurdres", "no text",
+  "textless version", "finished", "artwork", "detailed", "lively color",
+  "lively", "color", "graphic texture", "texture", "skin surface",
+  "lifelike flesh", "lifelike", "flesh", "obliques", "intricate",
+  "green", "beautiful", "style", "ultra detailed", "sharp focus",
+  "official art", "hyperdetailed", "cinematic lighting", "soft lighting",
+]);
+
+// NAI v4/v5 画师区提取：prompt 中 tag（最后一个 \n 之后的部分）之前的画师串。
+// 画师串形如 `0.9::misaka_12003-gou & dino, rurudo ::, year 2025, ...`，
+// 无 artist: 前缀，需用加权段 + 黑名单过滤。
+function extractFromArtistSection(prompt: string): ArtistTag[] {
+  const nl = prompt.lastIndexOf("\n");
+  if (nl < 0) return []; // 无 \n 分隔（经典单行 prompt）不猜测画师
+  const section = prompt.slice(0, nl);
+  const out: ArtistTag[] = [];
+  const seen = new Set<string>();
+  for (const raw of section.split(/[,&]/)) {
+    let p = raw.trim();
+    if (!p) continue;
+    const wm = p.match(/^(-?\d*\.?\d+)\s*::/);
+    if (wm) {
+      const w = Number.parseFloat(wm[1]);
+      if (!Number.isNaN(w) && w < 0) continue; // 负权重段跳过（如 -2::green ::）
+      p = p.slice(wm[0].length).trim();
+    }
+    p = p.replace(/::\s*$/, "").trim();
+    if (p.length < 2 || p.length > 40) continue;
+    if (/^\d+$/.test(p)) continue;
+    // 句子/描述性片段（含常见英文功能词或长句）跳过
+    if (
+      /\b(the|is|are|that|has|have|their|but|with|and|only|face|body|character|anime|style|image|drawn|finished|artwork|photo|texture|color|lively|lifelike|flesh|skin|surface|obliques|little|highly|best)\b/i.test(p)
+    ) continue;
+    const low = p.toLowerCase();
+    if (ARTIST_SECTION_BLACKLIST.has(low)) continue;
+    if (p.split(/\s+/).length > 3) continue; // 超过 3 个词不像画师名
+    if (seen.has(low)) continue;
+    seen.add(low);
+    out.push({ name: p, weight: 1, raw: raw.trim() });
+  }
+  return out;
+}
+
+// 判断文本是否纯画师列表（artist: 前缀 或 N::名字:: 加权名）。
+// 用于 uc：当 Negative Prompt 实际是一串画师名（排除画师）时，展示端按「排除画师」呈现。
+export function isArtistList(text: string | null | undefined): boolean {
+  if (!text || !text.trim()) return false;
+  const parts = text.split(",").map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 0) return false;
+  for (const part of parts) {
+    const p2 = part.replace(/^-?\d*\.?\d+\s*::\s*/i, "").trim(); // 去权重前缀
+    if (/^artist\s*:\s*[\w.\-\(\) ]+:*\s*$/i.test(p2)) continue; // artist:xxx / artist:xxx::
+    if (/^[\w.\-\(\) ]+::\s*$/.test(p2)) continue; // 加权名带结尾 ::
+    return false;
+  }
+  return true;
 }
 
 // 从 Uint8Array 解码 latin1 字符串

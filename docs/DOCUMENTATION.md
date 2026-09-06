@@ -267,7 +267,7 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 | `guard.ts` | `requireLogin()` 页面级登录保护 |
 | `types.ts` | 共享类型：Work/WorkListItem/PagedWorks/PerImageMeta/PngParseResult + `getPerImageMetas()` |
 | `format.ts` | ai_type 标签、日期格式化 |
-| `png.ts` | PNG tEXt chunk 解析：NovelAI Comment JSON + **画师(artist)提取** + **ComfyUI workflow 解析**（resolveNodeText 递归、JoinStringMulti/CR Prompt Text/ShowText 等自定义节点、unet_name 底模） |
+| `png.ts` | PNG tEXt chunk 解析：NovelAI Comment JSON + **画师(artist)提取**（artist: 前缀/花括号/权重 + **NAI v4/v5 加权画师串**，`isArtistList` 判定纯画师列表）+ **ComfyUI workflow 解析**（resolveNodeText 递归、JoinStringMulti/CR Prompt Text/ShowText 等自定义节点、unet_name 底模） |
 
 ### 组件（`src/components/`）
 | 文件 | 用途 |
@@ -304,7 +304,10 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 9. **中文用户名路由**：Next 对中文路径参数（`/u/空雨` → `%E7%A9%BA%E9%9B%A8`）**不自动解码**，页面里须手动 `decodeURIComponent`（已解码的中文调用会原样返回，幂等安全）。
 10. **.gitignore**：`/public/images/`、`/data/`、`/.next/`、`/node_modules/` 均忽略——**只提交源码**，图片与数据库不提交，迁移时单独处理。
 11. **月榜**：`/api/works?sort=monthly` 按 `total_bookmarks DESC, total_view DESC` 排序（页面下拉里有「月榜」选项）。
-12. **已知废弃**：中英切换、独立月榜页 = 废案（用户拍板不做）。
+12. **画师解析（NAI v4/v5）**：`extractArtistsFromPrompt` 除 `artist:` 前缀 / 花括号 / 权重格式外，还支持 **NAI v4/v5 加权画师段**（`0.9::misaka_12003-gou & dino, rurudo ::`，即 tag 之前以 `\n` 分隔的画师区；负权重段、质量词黑名单、长句过滤防误报）。纯 tag 单行 prompt 不猜测画师。
+13. **uc 纯画师列表 → 排除画师**：NAI 部分生成把「排除画师」写进 Negative Prompt（uc），详情页用 `isArtistList()` 识别后按 **「排除画师 Excluded Artists」** 呈现（数据不丢，只是正确归类），不再显示为 Negative Prompt。
+14. **存量作品画师补算**：`GET /api/works/[id]` 读取时若 NAI 作品 `artists` 为空，用增强逻辑从 `metadata.prompt`（兜底 `_raw.comment.prompt`）即时补算——旧作品无需跑迁移脚本即可显示画师。
+15. **已知废弃**：中英切换、独立月榜页 = 废案（用户拍板不做）。
 
 ---
 

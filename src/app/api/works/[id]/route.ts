@@ -1,11 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getWorkById, deleteWorkById } from "@/lib/db";
 import { currentUser } from "@/lib/auth";
+import { extractArtistsFromPrompt } from "@/lib/png";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 type Params = { params: Promise<{ id: string }> };
+
+// 存量 NAI 作品补算画师：早期上传的作品 artists 可能为空
+//（旧解析只认 artist: 前缀，NAI v4/v5 加权画师串提不到），读取时用增强逻辑补上。
+function backfillArtists(work: { metadata: unknown }): void {
+  const meta = work.metadata as Record<string, unknown> | null;
+  if (!meta || meta._format !== "nai") return;
+  const artists = meta.artists;
+  if (Array.isArray(artists) && artists.length > 0) return;
+  const prompt = String(meta.prompt ?? "");
+  let derived = extractArtistsFromPrompt(prompt);
+  if (derived.length === 0) {
+    const raw = meta._raw as Record<string, unknown> | null;
+    const comment = raw?.comment as Record<string, unknown> | null;
+    if (comment && typeof comment.prompt === "string") {
+      derived = extractArtistsFromPrompt(comment.prompt);
+    }
+  }
+  if (derived.length > 0) meta.artists = derived;
+}
 
 export async function GET(_req: NextRequest, { params }: Params) {
   const user = await currentUser();
@@ -17,6 +37,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   if (!work) {
     return NextResponse.json({ error: "作品不存在" }, { status: 404 });
   }
+  backfillArtists(work);
   return NextResponse.json(work);
 }
 
