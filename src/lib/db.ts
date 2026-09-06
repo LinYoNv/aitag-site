@@ -248,11 +248,14 @@ export function listWorks(opts: {
   const params: Array<string | number> = [];
 
   if (opts.q) {
+    // 转义 LIKE 通配符（% _ \），仅用于 metadata 的 prompt 匹配
+    const escQ = opts.q.replace(/[\\%_]/g, (c) => "\\" + c);
     where.push(
-      "(title LIKE ? OR caption LIKE ? OR author_name LIKE ? OR id LIKE ? OR tags LIKE ?)",
+      "(title LIKE ? OR caption LIKE ? OR author_name LIKE ? OR id LIKE ? OR tags LIKE ? OR metadata LIKE ? ESCAPE '\\')",
     );
     const like = `%${opts.q}%`;
-    params.push(like, like, like, like, like);
+    // 正向 prompt（"prompt": 键，含 per_image/_raw 存档）也参与搜索，与屏蔽 tag 同口径
+    params.push(like, like, like, like, like, `%"prompt":%${escQ}%`);
   }
   if (opts.prompt) {
     where.push("(metadata LIKE ?)");
