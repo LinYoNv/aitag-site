@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import zlib from "node:zlib";
 import { insertWork } from "@/lib/db";
 import { currentUser } from "@/lib/auth";
 import { getUserByApiToken } from "@/lib/db";
@@ -209,7 +210,10 @@ export async function POST(req: NextRequest) {
         try {
           // Buffer -> ArrayBuffer（parsePngMetadata 需要 ArrayBuffer）
           const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-          const parsed = parsePngMetadata(ab);
+          // 注入 zlib 解压器以支持 zTXt 压缩 Comment（NAI v5 常用）
+          const parsed = parsePngMetadata(ab, (compressed) =>
+            zlib.inflateSync(Buffer.from(compressed)).toString("latin1"),
+          );
           const perFormat = frontMeta?._format ?? aiType;
           meta = mergeServerMeta(frontMeta, parsed, String(perFormat));
         } catch (e) {

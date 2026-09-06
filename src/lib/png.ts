@@ -170,6 +170,36 @@ function parseTextChunk(data: Uint8Array): { keyword: string; value: string } {
   return { keyword, value };
 }
 
+// 解析 zTXt chunk：keyword \0 压缩方法(1字节) + deflate 压缩数据。
+// 需要外部注入解压器（后端 Node 传 zlib.inflateSync；浏览器端可用 DecompressionStream 的同步包装，
+// 若无则跳过该 chunk——预览可能缺参数，但保存时后端权威解析会修正）。
+export type ZtxtDecompressor = (compressed: Uint8Array) => string;
+
+function parseCompressedTextChunk(
+  data: Uint8Array,
+  decompress: ZtxtDecompressor,
+): { keyword: string; value: string } | null {
+  let nul = -1;
+  for (let i = 0; i < data.length; i++) {
+    if (data[i] === 0) {
+      nul = i;
+      break;
+    }
+  }
+  if (nul < 0) return null;
+  const keyword = decodeLatin1(data.slice(0, nul));
+  // nul+1 是压缩方法字节（0=deflate），nul+2 起是压缩数据
+  if (nul + 2 > data.length) return null;
+  const method = data[nul + 1];
+  if (method !== 0) return null; // 仅支持 deflate
+  try {
+    const value = decompress(data.slice(nul + 2));
+    return { keyword, value };
+  } catch {
+    return null;
+  }
+}
+
 // 把 NovelAI Comment JSON 归一化为展示用的字段
 function normalizeNovelAi(comment: Record<string, unknown>): NovelAiMetadata {
   return {
@@ -418,7 +448,10 @@ export function parseComfyUi(metadata: string | null): ComfyUiMetadata | null {
 }
 
 // 主入口：解析 PNG 文件，返回元数据
-export function parsePngMetadata(buf: ArrayBuffer): PngParseResult {
+export function parsePngMetadata(
+  buf: ArrayBuffer,
+  decompress?: ZtxtDecompressor,
+): PngParseResult {
   try {
     const chunks = parseChunks(buf);
 
@@ -438,6 +471,10 @@ export function parsePngMetadata(buf: ArrayBuffer): PngParseResult {
       if (c.type === "tEXt") {
         const { keyword, value } = parseTextChunk(c.data);
         texts[keyword] = value;
+      } else if (c.type === "zTXt" && decompress) {
+        // zTXt（压缩文本，NAI v5 常用）：需要注入解压器（后端 zlib.inflateSync）
+        const parsed = parseCompressedTextChunk(c.data, decompress);
+        if (parsed) texts[parsed.keyword] = parsed.value;
       }
     }
 
