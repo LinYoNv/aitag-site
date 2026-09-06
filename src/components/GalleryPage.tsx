@@ -57,7 +57,7 @@ export default function GalleryPage({ user }: { user: UserInfo }) {
           AI 咒语图库
         </h1>
         <form
-          className="flex-1 flex gap-2 max-w-2xl max-sm:order-[100] max-sm:basis-full"
+          className="flex-1 flex gap-2 max-w-2xl max-sm:order-[100] max-sm:basis-full max-sm:flex-col"
           onSubmit={(e) => {
             e.preventDefault();
             setQ(input.trim());
@@ -76,11 +76,11 @@ export default function GalleryPage({ user }: { user: UserInfo }) {
             onChange={(e) => setBlockInput(e.target.value)}
             placeholder="屏蔽 tag（如 nsfw，逗号分隔）"
             title="正向 prompt 里带这些 tag 的图将被隐藏"
-            className="w-40 max-sm:w-32 min-w-0 shrink-0 bg-[#151922] border border-[#5a2a3a] rounded-lg px-3 py-1.5 text-sm text-[#e6edf3] placeholder-[#7a5a6a] outline-none focus:border-[#ff7a9a]"
+            className="w-40 max-sm:w-full min-w-0 shrink-0 max-sm:shrink bg-[#151922] border border-[#5a2a3a] rounded-lg px-3 py-1.5 text-sm text-[#e6edf3] placeholder-[#7a5a6a] outline-none focus:border-[#ff7a9a]"
           />
           <button
             type="submit"
-            className="bg-[#4c9fff] text-white text-sm px-4 py-1.5 rounded-lg hover:opacity-90 shrink-0"
+            className="bg-[#4c9fff] text-white text-sm px-4 py-1.5 rounded-lg hover:opacity-90 shrink-0 max-sm:w-full"
           >
             搜索
           </button>

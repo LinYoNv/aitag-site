@@ -325,7 +325,10 @@ export function listWorks(opts: {
       author_name: w.author_name,
       total_view: w.total_view,
       total_bookmarks: w.total_bookmarks,
-      cover: w.images[0] ?? "",
+      // 列表卡片用缩略图（480px WebP），详情页仍用原图 /api/images/
+      cover: w.images[0]
+        ? w.images[0].replace("/api/images/", "/api/images/thumb/")
+        : "",
     };
   });
 
@@ -404,7 +407,10 @@ export function listBookmarkedWorks(
       author_name: w.author_name,
       total_view: w.total_view,
       total_bookmarks: w.total_bookmarks,
-      cover: w.images[0] ?? "",
+      // 列表卡片用缩略图（480px WebP），详情页仍用原图 /api/images/
+      cover: w.images[0]
+        ? w.images[0].replace("/api/images/", "/api/images/thumb/")
+        : "",
     };
   });
   return {
@@ -436,7 +442,10 @@ export function getMonthlyRank(limit = 20): WorkListItem[] {
       author_name: w.author_name,
       total_view: w.total_view,
       total_bookmarks: w.total_bookmarks,
-      cover: w.images[0] ?? "",
+      // 列表卡片用缩略图（480px WebP），详情页仍用原图 /api/images/
+      cover: w.images[0]
+        ? w.images[0].replace("/api/images/", "/api/images/thumb/")
+        : "",
     };
   });
 }
