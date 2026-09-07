@@ -94,6 +94,10 @@ function extractFromArtistSection(prompt: string): ArtistTag[] {
       p = p.slice(wm[0].length).trim();
     }
     p = p.replace(/::\s*$/, "").trim();
+    // 剥掉段首尾的重量花括号（NAI 的 `{加重}`/`{{{{ }}}}` 语法），
+    // 否则 `{textless version` 这类加重描述词会带括号而漏过黑名单，也导致
+    // `{{{{artist:asanagi}}}}` 的 artist: 前缀判断失效。**必须在 artist: 之前剥**。
+    p = p.replace(/^\{+|\}+$/g, "").trim();
     // artist: 前缀段由主正则负责，这里跳过避免重复。**必须在权重 slice 之后**，
     // 否则 `0.6::artist:chocoan` 会被误当成普通加权名提取（Bug 2）。
     if (/^artist\s*:/i.test(p)) continue;
