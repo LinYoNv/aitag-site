@@ -22,7 +22,6 @@ export default function WorkDetailClient({ work, canDelete, isAdmin }: Props) {
   const [bookmarks, setBookmarks] = useState(work.total_bookmarks ?? 0);
   const [views, setViews] = useState(work.total_view ?? 0);
   const [actionMsg, setActionMsg] = useState("");
-  const [exporting, setExporting] = useState(false);
   const perImages = getPerImageMetas(work.metadata);
   const images = work.images.length > 0 ? work.images : [];
   const multi = images.length > 1;
@@ -112,24 +111,6 @@ export default function WorkDetailClient({ work, canDelete, isAdmin }: Props) {
       setDeleteMsg("网络错误");
       setDeleting(false);
     }
-  }
-
-  async function handleExport() {
-    setExporting(true);
-    try {
-      const res = await fetch("/api/export", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: [work.id] }) });
-      if (!res.ok) { setActionMsg("导出失败，请先登录"); return; }
-      const blob = await res.blob(); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "aitag-export.zip"; a.click(); URL.revokeObjectURL(url);
-    } catch { setActionMsg("网络错误"); } finally { setExporting(false); }
-  }
-
-  function handleReproduce() {
-    const meta = (multi ? perImages[0] : work.metadata) as Record<string, unknown> | null;
-    if (!meta) return;
-    const map: Record<string, string> = { prompt: "prompt", uc: "uc", sampler: "sampler", steps: "steps", scale: "scale", seed: "seed", model: "model" };
-    const qs = new URLSearchParams();
-    for (const [k, source] of Object.entries(map)) { const v = meta[source]; if (v != null && v !== "") qs.set(k, String(v)); }
-    window.location.href = `/upload?${qs.toString()}`;
   }
 
   // 计算每张图对应的参数：
@@ -259,8 +240,6 @@ export default function WorkDetailClient({ work, canDelete, isAdmin }: Props) {
           {actionMsg && (
             <span className="text-xs text-[#ff7a7a]">{actionMsg}</span>
           )}
-          <button onClick={handleReproduce} className="text-sm px-3 py-1.5 rounded-lg border border-[#262b36] bg-[#151922] text-[#aeb6c2] hover:border-[#4c9fff]">复现</button>
-          <button onClick={handleExport} disabled={exporting} className="text-sm px-3 py-1.5 rounded-lg border border-[#262b36] bg-[#151922] text-[#aeb6c2] hover:border-[#4c9fff] disabled:opacity-50">{exporting ? "导出中…" : "导出 ZIP"}</button>
         </div>
 
         {/* 图片区：单图放大显示，多图一排最多三张（参照 aitag.win） */}

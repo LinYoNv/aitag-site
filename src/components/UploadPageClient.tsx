@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { parsePngMetadata, parseComfyUi, extractArtistsFromPrompt } from "@/lib/png";
 import type { PngParseResult, ArtistTag } from "@/lib/types";
@@ -114,7 +114,6 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
   const [caption, setCaption] = useState("");
   const [manualPrompt, setManualPrompt] = useState("");
   const [manualNegative, setManualNegative] = useState("");
-  const [prefill, setPrefill] = useState<Record<string, string>>({});
   const [shareTitle, setShareTitle] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
@@ -123,21 +122,6 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
   );
 
   const aiType = tab === "nai" ? "nai" : tab === "comfyui" ? "comfyui" : "other";
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const keys = ["prompt", "uc", "sampler", "steps", "scale", "seed", "model"];
-    const values: Record<string, string> = {};
-    for (const key of keys) {
-      const value = params.get(key);
-      if (value) values[key] = value;
-    }
-    if (Object.keys(values).length) {
-      setPrefill(values);
-      setManualPrompt(values.prompt ?? "");
-      setManualNegative(values.uc ?? "");
-    }
-  }, []);
 
   const switchMode = (m: UploadMode) => {
     setTab(m);
@@ -158,16 +142,6 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
         parseResult: null,
         ...base,
       };
-      if (Object.keys(prefill).length) {
-        entry.prompt = prefill.prompt ?? entry.prompt;
-        entry.negative = prefill.uc ?? entry.negative;
-        entry.sampler = prefill.sampler ?? entry.sampler;
-        entry.steps = prefill.steps ?? entry.steps;
-        entry.scale = prefill.scale ?? entry.scale;
-        entry.seed = prefill.seed ?? entry.seed;
-        entry.model = prefill.model ?? entry.model;
-      }
-
       if (file.type === "image/png") {
         try {
           const buf = await file.arrayBuffer();
