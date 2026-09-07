@@ -59,6 +59,15 @@ const ARTIST_SECTION_BLACKLIST = new Set([
   "official art", "hyperdetailed", "cinematic lighting", "soft lighting",
   // NAI v5 布局 token（画师区尾部常出现，不是画师）
   "location", "order",
+  // 画质/风格/色彩/背景描述词（易被误认为画师，但实为画面修饰）
+  "smooth line", "clean lineart", "flat color", "simple background",
+  "blurry background", "white background", "dark background", "no background",
+  "depth of field", "soft focus", "vignette", "grainy", "sharp focus",
+  "rich colors", "vibrant colors", "colorful", "saturated", "desaturated",
+  "muted tones", "pale aesthetic", "silver-toned", "cinematic desaturation",
+  "black and white", "monochrome", "grayscale", "sepia", "pastel colors",
+  "natural skin", "glowing skin", "sunlight", "backlighting", "rim light",
+  "high contrast", "low contrast", "anime style", "semi-realistic",
 ]);
 
 // NAI v4/v5 画师区提取：prompt 中 tag（最后一个 \n 之后的部分）之前的画师串。
@@ -74,8 +83,6 @@ function extractFromArtistSection(prompt: string): ArtistTag[] {
   for (const raw of section.split(",")) {
     let p = raw.trim();
     if (!p) continue;
-    // artist: 前缀段由主正则负责，这里跳过避免重复（如 `artist:ningen_mame` 在画师区）
-    if (/^artist\s*:/i.test(p)) continue;
     let weight = 1;
     const wm = p.match(/^(-?\d*\.?\d+)\s*::/);
     if (wm) {
@@ -87,6 +94,9 @@ function extractFromArtistSection(prompt: string): ArtistTag[] {
       p = p.slice(wm[0].length).trim();
     }
     p = p.replace(/::\s*$/, "").trim();
+    // artist: 前缀段由主正则负责，这里跳过避免重复。**必须在权重 slice 之后**，
+    // 否则 `0.6::artist:chocoan` 会被误当成普通加权名提取（Bug 2）。
+    if (/^artist\s*:/i.test(p)) continue;
     if (p.length < 2 || p.length > 40) continue;
     if (/^\d+$/.test(p)) continue;
     // 句子/描述性片段（含常见英文功能词或长句）跳过
