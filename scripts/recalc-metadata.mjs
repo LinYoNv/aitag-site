@@ -131,7 +131,7 @@ export function parseComfyUi(metadata) {
   try {
     const parsed = JSON.parse(metadata);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-    graph = parsed;
+    graph = normalizeComfyWorkflow(parsed);
   } catch {
     return null;
   }
@@ -275,6 +275,30 @@ export function parseComfyUi(metadata) {
   return { prompt: positive, negativePrompt: negative, model, loras, sampler, scheduler, steps, cfg, seed, width, height, rawJson: metadata };
 }
 
+function normalizeComfyWorkflow(parsed) {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  if (!Array.isArray(parsed.nodes)) return parsed;
+  const links = new Map();
+  for (const link of parsed.links ?? []) {
+    if (Array.isArray(link) && link.length >= 5) links.set(String(link[0]), [String(link[1]), Number(link[2]) || 0]);
+  }
+  const graph = {};
+  for (const node of parsed.nodes) {
+    if (!node || (typeof node.id !== "number" && typeof node.id !== "string") || typeof node.type !== "string") continue;
+    const inputs = {};
+    const values = Array.isArray(node.widgets_values) ? node.widgets_values : [];
+    let wi = 0;
+    for (const input of node.inputs ?? []) {
+      if (!input || typeof input.name !== "string") continue;
+      const linked = links.get(String(input.link));
+      if (linked) inputs[input.name] = linked;
+      else if (input.widget) { if (values[wi] !== undefined) inputs[input.name] = values[wi]; wi++; }
+    }
+    graph[String(node.id)] = { class_type: node.type, inputs };
+  }
+  return Object.keys(graph).length ? graph : null;
+}
+
 // ============ 单图 metadata 重算 ============
 
 const NEG_PATTERN =
@@ -317,7 +341,7 @@ function recalcComfy(m, workflow) {
   out.scheduler = c.scheduler || m.scheduler || null;
   out.steps = c.steps || m.steps || null;
   out.cfg = c.cfg || m.cfg || null;
-  out.seed = c.seed || m.seed || null;
+  out.seed = c.seed ?? m.seed ?? null;
   out.width = c.width || m.width || null;
   out.height = c.height || m.height || null;
   out.loras = c.loras.length > 0 ? c.loras : (m.loras ?? []);
