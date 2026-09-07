@@ -231,8 +231,10 @@ function parseCompressedTextChunk(
   }
 }
 
-// 把 NovelAI Comment JSON 归一化为展示用的字段
-function normalizeNovelAi(comment: Record<string, unknown>): NovelAiMetadata {
+// 把 NovelAI Comment JSON 归一化为展示用的字段。
+// texts（tEXt/zTXt/iTXt 顶层字段）用于补偿 Comment 里缺失的信息：
+//   - Source：确切模型 ID（作者确认），如 "NovelAI Diffusion V4.5 4BDE2A90"
+function normalizeNovelAi(comment: Record<string, unknown>, texts?: Record<string, string>): NovelAiMetadata {
   const number = (value: unknown) => {
     const n = Number(value ?? 0);
     return Number.isFinite(n) ? n : 0;
@@ -248,16 +250,22 @@ function normalizeNovelAi(comment: Record<string, unknown>): NovelAiMetadata {
     seed: number(comment.seed),
     noiseSchedule: String(comment.noise_schedule ?? ""),
     // 模型：优先 model_name + model_hash（NAI v5 如 "NovelAI Diffusion V5 0ADF9AB7"），
-    // 其次 source（tEXt 或老格式），最后 "NovelAI"。
-    // 注意：comment.version 是协议版本号（数字 1），不是模型名，不能用作 model！
+    // 其次 comment.source，再其次 PNG 顶层 tEXt 的 Source（确切模型 ID，作者确认），
+    // 最后 "NovelAI"。注意 comment.version 是协议版本号（数字 1），不是模型名！
     model: (() => {
       const c = comment as Record<string, unknown>;
-      const name = String(c.model_name ?? "");
-      const hash = String(c.model_hash ?? "");
-      if (name) return hash ? `${name} ${hash}` : name;
-      const source = String(c.source ?? "");
-      if (source) return source;
-      return "NovelAI";
+      const name = String(c.model_name ?? "").trim();
+      const hash = String(c.model_hash ?? "").trim();
+      const source = String(c.source ?? "").trim();
+      const textSource = String(texts?.Source ?? "").trim();
+      // model_name 通常是空或 "NovelAI"；仅在非占位时才值得作为兜底
+      const pick = (v: string) => (v && v !== "NovelAI" ? v : "");
+      const best =
+        pick(name + (name && hash ? ` ${hash}` : "")) ||
+        pick(source) ||
+        pick(textSource) ||
+        (name ? name : "");
+      return best || "NovelAI";
     })(),
     // CFG Rescale（NAI 的 CFG 重缩放比例，如 1.5）——有值才带，避免显示 0
     ...(comment.cfg_rescale !== undefined && comment.cfg_rescale !== null
@@ -675,7 +683,7 @@ export function parsePngMetadata(
       try {
         const comment = JSON.parse(texts.Comment) as unknown;
         if (!isRecord(comment)) throw new Error("Comment 不是对象");
-        const novelai = normalizeNovelAi(comment);
+        const novelai = normalizeNovelAi(comment, texts);
         return {
           ok: true,
           metadata: { ...texts, comment },
