@@ -214,7 +214,9 @@ export async function POST(req: NextRequest) {
           const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
           // 注入 zlib 解压器以支持 zTXt 压缩 Comment（NAI v5 常用）
           const parsed = parsePngMetadata(ab, (compressed) =>
-            zlib.inflateSync(Buffer.from(compressed)).toString("latin1"),
+            zlib.inflateSync(Buffer.from(compressed), { maxOutputLength: 4 * 1024 * 1024 }).toString("latin1"),
+            (compressed) =>
+              zlib.inflateSync(Buffer.from(compressed), { maxOutputLength: 4 * 1024 * 1024 }).toString("utf8"),
           );
           const perFormat = frontMeta?._format ?? aiType;
           meta = mergeServerMeta(frontMeta, parsed, String(perFormat));

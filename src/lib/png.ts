@@ -192,6 +192,7 @@ function parseTextChunk(data: Uint8Array): { keyword: string; value: string } {
 // 需要外部注入解压器（后端 Node 传 zlib.inflateSync；浏览器端可用 DecompressionStream 的同步包装，
 // 若无则跳过该 chunk——预览可能缺参数，但保存时后端权威解析会修正）。
 export type ZtxtDecompressor = (compressed: Uint8Array) => string;
+export type ItxtDecompressor = ZtxtDecompressor;
 
 function parseCompressedTextChunk(
   data: Uint8Array,
@@ -220,15 +221,19 @@ function parseCompressedTextChunk(
 
 // 把 NovelAI Comment JSON 归一化为展示用的字段
 function normalizeNovelAi(comment: Record<string, unknown>): NovelAiMetadata {
+  const number = (value: unknown) => {
+    const n = Number(value ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  };
   return {
     prompt: String(comment.prompt ?? ""),
     negativePrompt: String(comment.uc ?? ""),
     sampler: String(comment.sampler ?? ""),
-    steps: Number(comment.steps ?? 0),
-    width: Number(comment.width ?? 0),
-    height: Number(comment.height ?? 0),
-    scale: Number(comment.scale ?? 0),
-    seed: Number(comment.seed ?? 0),
+    steps: number(comment.steps),
+    width: number(comment.width),
+    height: number(comment.height),
+    scale: number(comment.scale),
+    seed: number(comment.seed),
     noiseSchedule: String(comment.noise_schedule ?? ""),
     // 模型：优先 model_name + model_hash（NAI v5 如 "NovelAI Diffusion V5 0ADF9AB7"），
     // 其次 source（tEXt 或老格式），最后 "NovelAI"。
@@ -244,7 +249,7 @@ function normalizeNovelAi(comment: Record<string, unknown>): NovelAiMetadata {
     })(),
     // CFG Rescale（NAI 的 CFG 重缩放比例，如 1.5）——有值才带，避免显示 0
     ...(comment.cfg_rescale !== undefined && comment.cfg_rescale !== null
-      ? { cfg_rescale: Number(comment.cfg_rescale) }
+      ? { cfg_rescale: number(comment.cfg_rescale) }
       : {}),
   };
 }
@@ -547,6 +552,7 @@ export function parseComfyUi(metadata: string | null): ComfyUiMetadata | null {
 export function parsePngMetadata(
   buf: ArrayBuffer,
   decompress?: ZtxtDecompressor,
+  decompressItxt?: ItxtDecompressor,
 ): PngParseResult {
   try {
     const chunks = parseChunks(buf);
@@ -571,12 +577,28 @@ export function parsePngMetadata(
         // zTXt（压缩文本，NAI v5 常用）：需要注入解压器（后端 zlib.inflateSync）
         const parsed = parseCompressedTextChunk(c.data, decompress);
         if (parsed) texts[parsed.keyword] = parsed.value;
+      } else if (c.type === "iTXt") {
+        const nul = c.data.indexOf(0);
+        if (nul < 0 || nul + 2 >= c.data.length) continue;
+        const keyword = decodeLatin1(c.data.slice(0, nul));
+        const flag = c.data[nul + 1];
+        const method = c.data[nul + 2];
+        let p = nul + 3;
+        const langEnd = c.data.indexOf(0, p); if (langEnd < 0) continue; p = langEnd + 1;
+        const translatedEnd = c.data.indexOf(0, p); if (translatedEnd < 0) continue; p = translatedEnd + 1;
+        try {
+          const raw = c.data.slice(p);
+          const value = flag === 1 && method === 0
+            ? (decompressItxt ? decompressItxt(raw) : "")
+            : flag === 0 ? new TextDecoder().decode(raw) : "";
+          if (value) texts[keyword] = value;
+        } catch { /* ignore malformed text */ }
       }
     }
 
     // ComfyUI 把 workflow 存在 tEXt "prompt" / "workflow"
     if (texts.prompt || texts.workflow) {
-      const comfyui = parseComfyUi(texts.prompt || texts.workflow);
+      const comfyui = parseComfyUi(texts.prompt) ?? parseComfyUi(texts.workflow);
       if (comfyui) {
         return {
           ok: true,
@@ -591,7 +613,8 @@ export function parsePngMetadata(
     // NovelAI 把参数放在 Comment
     if (texts.Comment) {
       try {
-        const comment = JSON.parse(texts.Comment) as Record<string, unknown>;
+        const comment = JSON.parse(texts.Comment) as unknown;
+        if (!isRecord(comment)) throw new Error("Comment 不是对象");
         const novelai = normalizeNovelAi(comment);
         return {
           ok: true,
