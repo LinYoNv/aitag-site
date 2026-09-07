@@ -212,11 +212,12 @@ export async function POST(req: NextRequest) {
         try {
           // Buffer -> ArrayBuffer（parsePngMetadata 需要 ArrayBuffer）
           const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-          // 注入 zlib 解压器以支持 zTXt 压缩 Comment（NAI v5 常用）
+          // 注入 zlib 解压器以支持 zTXt 压缩 Comment（NAI v5 常用）。
+          // 用 utf8 解码（兼容中文标签），并限制 4MB 防 zip bomb。
           const parsed = parsePngMetadata(ab, (compressed) =>
-            zlib.inflateSync(Buffer.from(compressed), { maxOutputLength: 4 * 1024 * 1024 }).toString("latin1"),
-            (compressed) =>
-              zlib.inflateSync(Buffer.from(compressed), { maxOutputLength: 4 * 1024 * 1024 }).toString("utf8"),
+            zlib
+              .inflateSync(Buffer.from(compressed), { maxOutputLength: 4 * 1024 * 1024 })
+              .toString("utf8"),
           );
           const perFormat = frontMeta?._format ?? aiType;
           meta = mergeServerMeta(frontMeta, parsed, String(perFormat));
