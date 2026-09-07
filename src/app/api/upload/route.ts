@@ -199,10 +199,13 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: `失败：第 ${i + 1} 张仅支持 PNG/JPEG/WebP` }, { status: 400 });
       }
 
-      const id = crypto.randomBytes(8).toString("hex");
-      const filename = `u_${id}${ext}`;
-      fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-      fs.writeFileSync(path.join(UPLOAD_DIR, filename), bytes);
+      const contentHash = crypto.createHash("sha256").update(bytes).digest("hex");
+      const filename = `${contentHash}${ext}`;
+      const filePath = path.join(UPLOAD_DIR, filename);
+      if (!fs.existsSync(filePath)) {
+        fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+        fs.writeFileSync(filePath, bytes);
+      }
 
       // 前端提交的解析结果（可能是旧/错误逻辑，仅作编辑参考）
       const frontMeta = parseMeta(String(form.get(`meta_${i}`) ?? ""));
