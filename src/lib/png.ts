@@ -235,17 +235,88 @@ function normalizeNovelAi(comment: Record<string, unknown>): NovelAiMetadata {
   };
 }
 
+type ComfyGraph = Record<string, { class_type?: string; inputs?: Record<string, unknown> }>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+// ComfyUI "Save" 导出的工作流使用 nodes/links/widgets_values，PNG 内嵌的 prompt
+// 则是执行图。先把前者转换成后者，后续字段提取只维护一套逻辑。
+function normalizeComfyWorkflow(parsed: unknown): ComfyGraph | null {
+  if (!isRecord(parsed)) return null;
+
+  if (!Array.isArray(parsed.nodes)) {
+    const graph: ComfyGraph = {};
+    for (const [id, node] of Object.entries(parsed)) {
+      if (!isRecord(node) || typeof node.class_type !== "string") continue;
+      graph[id] = {
+        class_type: node.class_type,
+        inputs: isRecord(node.inputs) ? node.inputs : {},
+      };
+    }
+    return Object.keys(graph).length > 0 ? graph : null;
+  }
+
+  const links = new Map<string, [string, number]>();
+  if (Array.isArray(parsed.links)) {
+    for (const link of parsed.links) {
+      if (
+        !Array.isArray(link) ||
+        link.length < 5 ||
+        (typeof link[0] !== "number" && typeof link[0] !== "string") ||
+        (typeof link[1] !== "number" && typeof link[1] !== "string")
+      ) {
+        continue;
+      }
+      const outputIndex = Number(link[2]);
+      links.set(String(link[0]), [String(link[1]), Number.isFinite(outputIndex) ? outputIndex : 0]);
+    }
+  }
+
+  const graph: ComfyGraph = {};
+  for (const rawNode of parsed.nodes) {
+    if (!isRecord(rawNode) || (typeof rawNode.id !== "number" && typeof rawNode.id !== "string")) continue;
+    if (typeof rawNode.type !== "string") continue;
+
+    const inputs: Record<string, unknown> = {};
+    const widgetValues = rawNode.widgets_values;
+    const widgets = Array.isArray(widgetValues) ? widgetValues : [];
+    const namedWidgets = isRecord(widgetValues) ? widgetValues : {};
+    let widgetIndex = 0;
+
+    if (Array.isArray(rawNode.inputs)) {
+      for (const rawInput of rawNode.inputs) {
+        if (!isRecord(rawInput) || typeof rawInput.name !== "string") continue;
+        const linked = links.get(String(rawInput.link));
+        if (linked) {
+          inputs[rawInput.name] = linked;
+          continue;
+        }
+        if (!isRecord(rawInput.widget)) continue;
+        const widgetName = typeof rawInput.widget.name === "string" ? rawInput.widget.name : rawInput.name;
+        const value = Array.isArray(widgetValues) ? widgets[widgetIndex] : namedWidgets[widgetName];
+        widgetIndex++;
+        if (value !== undefined) inputs[rawInput.name] = value;
+      }
+    }
+
+    graph[String(rawNode.id)] = { class_type: rawNode.type, inputs };
+  }
+  return Object.keys(graph).length > 0 ? graph : null;
+}
+
 // ComfyUI 解析：读 PNG 内嵌的 workflow JSON（tEXt "prompt" / "workflow"）
 export function parseComfyUi(metadata: string | null): ComfyUiMetadata | null {
   if (!metadata) return null;
-  let graph: Record<string, { class_type?: string; inputs?: Record<string, unknown> }>;
+  let graph: ComfyGraph | null;
   try {
     const parsed = JSON.parse(metadata) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-    graph = parsed as Record<string, { class_type?: string; inputs?: Record<string, unknown> }>;
+    graph = normalizeComfyWorkflow(parsed);
   } catch {
     return null;
   }
+  if (!graph) return null;
 
   const entries = Object.entries(graph);
 

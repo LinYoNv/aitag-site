@@ -104,7 +104,7 @@ function mergeServerMeta(
     out.scheduler = c.scheduler || fm.scheduler || null;
     out.steps = c.steps || fm.steps || null;
     out.cfg = c.cfg || fm.cfg || null;
-    out.seed = c.seed || fm.seed || null;
+    out.seed = c.seed ?? fm.seed ?? null;
     out.width = c.width || fm.width || null;
     out.height = c.height || fm.height || null;
     out.rawJson = c.rawJson ?? fm.rawJson ?? null;
@@ -123,7 +123,7 @@ function mergeServerMeta(
     out.width = fm.width || n.width || null;
     out.height = fm.height || n.height || null;
     out.scale = fm.scale ?? n.scale ?? null;
-    out.seed = fm.seed || n.seed || null;
+    out.seed = fm.seed ?? n.seed ?? null;
     out.noise_schedule = fm.noise_schedule ?? n.noiseSchedule ?? null;
     // CFG Rescale（NAI 的 cfg_rescale，如 1.5）——后端权威，前端编辑兜底
     out.cfg_rescale = fm.cfg_rescale ?? n.cfg_rescale ?? null;

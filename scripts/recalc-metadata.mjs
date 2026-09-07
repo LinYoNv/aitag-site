@@ -314,31 +314,59 @@ function recalcComfy(m, workflow) {
   return out;
 }
 
+function normalizeNaiComment(commentText) {
+  try {
+    const comment = JSON.parse(commentText);
+    if (!comment || typeof comment !== "object" || Array.isArray(comment)) return null;
+    const number = (key) => {
+      const value = Number(comment[key] ?? 0);
+      return Number.isFinite(value) ? value : 0;
+    };
+    const modelName = String(comment.model_name ?? "");
+    const modelHash = String(comment.model_hash ?? "");
+    const source = String(comment.source ?? "");
+    const metadata = {
+      prompt: String(comment.prompt ?? ""),
+      uc: String(comment.uc ?? ""),
+      sampler: String(comment.sampler ?? ""),
+      steps: number("steps"),
+      width: number("width"),
+      height: number("height"),
+      scale: number("scale"),
+      seed: number("seed"),
+      noise_schedule: String(comment.noise_schedule ?? ""),
+      model: modelName ? (modelHash ? `${modelName} ${modelHash}` : modelName) : (source || "NovelAI"),
+    };
+    if (comment.cfg_rescale !== undefined && comment.cfg_rescale !== null) {
+      metadata.cfg_rescale = number("cfg_rescale");
+    }
+    return metadata;
+  } catch {
+    return null;
+  }
+}
+
 function recalcNai(m, texts) {
   const out = { ...m };
   out._format = m._format || "nai";
-  const prompt = String(m.prompt ?? texts.Comment ?? texts.Description ?? "");
+  const parsed = normalizeNaiComment(texts.Comment ?? "");
+  const prompt = parsed?.prompt ?? String(m.prompt ?? texts.Description ?? "");
   out.prompt = prompt;
-  out.uc = String(m.uc ?? "");
+  out.uc = parsed?.uc ?? String(m.uc ?? "");
+  if (parsed) {
+    out.sampler = parsed.sampler;
+    out.steps = parsed.steps;
+    out.width = parsed.width;
+    out.height = parsed.height;
+    out.scale = parsed.scale;
+    out.seed = parsed.seed;
+    out.noise_schedule = parsed.noise_schedule;
+    out.model = parsed.model;
+    if (parsed.cfg_rescale !== undefined) out.cfg_rescale = parsed.cfg_rescale;
+  }
   // 画师：从权威 prompt 提取
   const artists = extractArtistsFromPrompt(prompt);
   out.artists = artists.length > 0 ? artists : (m.artists ?? null);
-  // cfg_rescale：从 Comment JSON 提取（老数据缺字段时补全；已存在则保留）
-  if (out.cfg_rescale === undefined || out.cfg_rescale === null) {
-    try {
-      const commentObj = typeof texts.Comment === "string" ? JSON.parse(texts.Comment) : null;
-      if (
-        commentObj &&
-        typeof commentObj === "object" &&
-        commentObj.cfg_rescale !== undefined &&
-        commentObj.cfg_rescale !== null
-      ) {
-        out.cfg_rescale = Number(commentObj.cfg_rescale);
-      }
-    } catch {
-      // Comment 不是 JSON 时忽略
-    }
-  }
   // _raw 存档（Comment 原文）
   const raw = buildRawStore(texts, texts.Comment ?? null, null);
   if (raw) out._raw = { ...(m._raw ?? {}), ...raw };

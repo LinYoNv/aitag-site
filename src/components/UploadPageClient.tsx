@@ -157,7 +157,7 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
             entry.sampler = res.novelai.sampler;
             entry.steps = String(res.novelai.steps || "");
             entry.scale = String(res.novelai.scale || "");
-            entry.seed = String(res.novelai.seed || "");
+            entry.seed = String(res.novelai.seed);
             entry.width = String(res.novelai.width || "");
             entry.height = String(res.novelai.height || "");
             entry.model = res.novelai.model && res.novelai.model !== "NovelAI" ? res.novelai.model : "";
@@ -171,7 +171,7 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
             entry.negative = res.comfyui.negativePrompt;
             entry.sampler = res.comfyui.sampler;
             entry.cfg = String(res.comfyui.cfg || "");
-            entry.seed = String(res.comfyui.seed || "");
+            entry.seed = String(res.comfyui.seed);
             entry.width = String(res.comfyui.width || "");
             entry.height = String(res.comfyui.height || "");
             entry.model = res.comfyui.model;
@@ -212,7 +212,7 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
       negative: c.negativePrompt,
       sampler: c.sampler,
       cfg: String(c.cfg || ""),
-      seed: String(c.seed || ""),
+      seed: String(c.seed),
       width: String(c.width || ""),
       height: String(c.height || ""),
       model: c.model,
