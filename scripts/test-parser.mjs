@@ -112,6 +112,40 @@ try {
     },
   );
   assert.equal(parseComfyUi(JSON.stringify({ nodes: [] })), null);
+
+  // ── 回归：反向追溯只采活跃子图（从 SaveImage 输出根反推），孤立分支不被污染 ──
+  const trace = {
+    nodes: [
+      { id: 1, type: "CheckpointLoaderSimple", inputs: [{ name: "ckpt_name", widget: { name: "ckpt_name" } }], widgets_values: ["main.safetensors"] },
+      { id: 2, type: "CLIPTextEncode", inputs: [{ name: "text", widget: { name: "text" } }], widgets_values: ["活跃画师绘制"] },
+      { id: 3, type: "KSampler", inputs: [
+        { name: "positive", link: 11 }, { name: "negative", link: 12 },
+        { name: "seed", widget: { name: "seed" } }, { name: "steps", widget: { name: "steps" } },
+        { name: "cfg", widget: { name: "cfg" } }, { name: "sampler_name", widget: { name: "sampler_name" } },
+      ], widgets_values: [0, 30, 6, "euler_ancestral"] },
+      { id: 4, type: "SaveImage", inputs: [{ name: "images", link: 13 }] },
+      // 孤立的无关采样分支：不连到 SaveImage，不应被采到
+      { id: 5, type: "CLIPTextEncode", inputs: [{ name: "text", widget: { name: "text" } }], widgets_values: ["孤立垃圾分支 prompt"] },
+      { id: 6, type: "KSampler", inputs: [
+        { name: "positive", link: 14 }, { name: "seed", widget: { name: "seed" } },
+        { name: "steps", widget: { name: "steps" } }, { name: "sampler_name", widget: { name: "sampler_name" } },
+      ], widgets_values: [99, 1, "lcm"] },
+    ],
+    links: [
+      [11, 2, 0, 3, 0, "CONDITIONING"],
+      [12, 0, 0, 3, 1, "CONDITIONING"],
+      [13, 3, 0, 4, 0, "IMAGE"],
+      [14, 5, 0, 6, 0, "CONDITIONING"],
+    ],
+  };
+  const traced = parseComfyUi(JSON.stringify(trace));
+  assert.ok(traced);
+  assert.equal(traced.prompt, "活跃画师绘制", "应取活跃子图内 CLIPTextEncode 的文本");
+  assert.equal(traced.prompt.includes("孤立垃圾"), false, "孤立分支 prompt 不应混入");
+  assert.equal(traced.sampler, "euler_ancestral", "应从活跃采样器取值");
+  assert.equal(traced.steps, 30, "应从活跃采样器取 steps");
+  assert.equal(traced.cfg, 6, "应从活跃采样器取 cfg");
+  assert.equal(traced.seed, 0, "应从活跃采样器取 seed");
   console.log("parser tests passed");
 } finally {
   fs.rmSync(temp, { recursive: true, force: true });

@@ -3,6 +3,18 @@
 
 import type { NovelAiMetadata, ComfyUiMetadata, PngParseResult, ArtistTag } from "./types";
 
+// ── 解析健壮性护栏（防止恶意/畸形 PNG 或超深 JSON 打崩接口）─────────────────
+/** 单个 PNG 中内嵌文本 chunk（tEXt/zTXt/iTXt）值的最长字节数，超过视为异常 */
+export const MAX_TEXT_VALUE_BYTES = 4 * 1024 * 1024; // 4MB
+/** ComfyUI 工作流允许的最大节点数（防超大图撑爆遍历） */
+export const MAX_COMFY_NODES = 2048;
+/** ComfyUI 节点文本递归解析的最大层数 */
+export const MAX_COMFY_DEPTH = 100;
+/** JSON 值嵌套递归清洗的最大层数 */
+export const MAX_JSON_DEPTH = 100;
+/** 超出 MAX_SAFE_INTEGER 的整数会被转成字符串，避免精度丢失（护栏语义） */
+export const MAX_SAFE_INTEGER = 9007199254740991;
+
 // 从 NovelAI prompt 文本中提取画师（artist）列表
 // 支持三种格式：
 //   数值权重：`1.4::artist:nueegochi ::` 或 `-2::artist:collaboration::`
@@ -322,11 +334,48 @@ function normalizeComfyWorkflow(parsed: unknown): ComfyGraph | null {
 
     graph[String(rawNode.id)] = { class_type: rawNode.type, inputs };
   }
-  return Object.keys(graph).length > 0 ? graph : null;
+  const keys = Object.keys(graph);
+  // 节点数护栏：超大/恶意工作流直接拒绝，防遍历撑爆接口
+  if (keys.length > MAX_COMFY_NODES) return null;
+  return keys.length > 0 ? graph : null;
+}
+
+function comfyRef(v: unknown, graph: ComfyGraph): v is [string, number] {
+  return Array.isArray(v) && v.length === 2 && typeof v[0] === "string" && Number.isInteger(v[1]) && v[1] >= 0 && Boolean(graph[v[0]]);
+}
+
+function collectOrder(graph: ComfyGraph, root: string): string[] {
+  const order: string[] = [];
+  const active = new Set<string>();
+  const state = new Set<string>();
+  const visit = (id: string, depth: number) => {
+    if (depth > MAX_COMFY_DEPTH || state.has(id) || active.has(id) || !graph[id]) return;
+    active.add(id);
+    for (const value of Object.values(graph[id].inputs ?? {})) {
+      if (comfyRef(value, graph)) visit(value[0], depth + 1);
+    }
+    active.delete(id);
+    state.add(id);
+    order.push(id);
+  };
+  visit(root, 0);
+  return order;
+}
+
+function selectOutputs(graph: ComfyGraph, outputNodeId?: string): { roots: string[]; saves: string[]; order: string[]; selectedRoot: string | null } {
+  const outputTypes = new Set(["SaveImage", "SaveAnimatedWEBP", "SaveAnimatedPNG", "SaveImageWebsocket", "PreviewImage"]);
+  const roots = Object.entries(graph).filter(([, n]) => outputTypes.has(n.class_type ?? "")).map(([id]) => id);
+  const saves = roots.filter((id) => graph[id].class_type !== "PreviewImage");
+  let selectedRoot: string | null = null;
+  if (outputNodeId && roots.includes(outputNodeId)) selectedRoot = outputNodeId;
+  else if (saves.length === 1) selectedRoot = saves[0];
+  else if (saves.length === 0 && roots.length === 1) selectedRoot = roots[0];
+  const order = selectedRoot ? collectOrder(graph, selectedRoot) : [];
+  return { roots, saves, order, selectedRoot };
 }
 
 // ComfyUI 解析：读 PNG 内嵌的 workflow JSON（tEXt "prompt" / "workflow"）
-export function parseComfyUi(metadata: string | null): ComfyUiMetadata | null {
+export function parseComfyUi(metadata: string | null, outputNodeId?: string): ComfyUiMetadata | null {
   if (!metadata) return null;
   let graph: ComfyGraph | null;
   try {
@@ -337,7 +386,13 @@ export function parseComfyUi(metadata: string | null): ComfyUiMetadata | null {
   }
   if (!graph) return null;
 
-  const entries = Object.entries(graph);
+  const selected = selectOutputs(graph, outputNodeId);
+  // 无输出根（如纯 PreviewImage 采样或无 Save 节点的工作流）：不设活跃子图，
+  // 退化为全图扫描，保持原有的"能从图内任一采样器提取参数"能力，避免回归。
+  const entries: Array<[string, { class_type?: string; inputs?: Record<string, unknown> }]> =
+    selected.order.length > 0
+      ? selected.order.map((id) => [id, graph[id]] as const)
+      : (Object.entries(graph) as Array<[string, { class_type?: string; inputs?: Record<string, unknown> }]>);
 
   // 递归解析节点文本：支持 Anima 自定义节点组合
   //  - CLIPTextEncode.text 引用 JoinStringMulti / CR Prompt Text 等
@@ -345,7 +400,7 @@ export function parseComfyUi(metadata: string | null): ComfyUiMetadata | null {
   //  - CR Prompt Text：读 prompt 字段
   //  - ShowText|pysssss：读 text_0 字段
   const resolveNodeText = (nodeId: string, depth = 0): string => {
-    if (depth > 6) return "";
+    if (depth > MAX_COMFY_DEPTH) return "";
     const n = graph[nodeId];
     if (!n) return "";
     const t = n.class_type ?? "";
@@ -569,14 +624,19 @@ export function parsePngMetadata(
     }
 
     const texts: Record<string, string> = {};
+    // 写入护栏：拒绝超长文本，避免超大 Comment/workflow 撑爆后续解析
+    const setText = (key: string, value: string): void => {
+      if (value.length > MAX_TEXT_VALUE_BYTES) return;
+      texts[key] = value;
+    };
     for (const c of chunks) {
       if (c.type === "tEXt") {
         const { keyword, value } = parseTextChunk(c.data);
-        texts[keyword] = value;
+        setText(keyword, value);
       } else if (c.type === "zTXt" && decompress) {
         // zTXt（压缩文本，NAI v5 常用）：需要注入解压器（后端 zlib.inflateSync）
         const parsed = parseCompressedTextChunk(c.data, decompress);
-        if (parsed) texts[parsed.keyword] = parsed.value;
+        if (parsed) setText(parsed.keyword, parsed.value);
       } else if (c.type === "iTXt") {
         const nul = c.data.indexOf(0);
         if (nul < 0 || nul + 2 >= c.data.length) continue;
