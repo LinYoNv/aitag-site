@@ -277,9 +277,10 @@ export default function WorkDetailClient({ work, canDelete, isAdmin }: Props) {
         )}
       </main>
 
-      {/* 灯箱：点击图片打开，←→/触屏切换，Esc/点遮罩关闭 */}
+      {/* 灯箱：点击图片打开，←→/触屏切换，Esc/点遮罩关闭；右侧显示当前图参数 */}
       <Lightbox
         images={images}
+        metas={perImages}
         index={lightboxIndex}
         title={`${work.title || work.id}`}
         onClose={() => setLightboxIndex(null)}
