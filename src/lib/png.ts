@@ -387,7 +387,9 @@ export function parseComfyUi(metadata: string | null, outputNodeId?: string): Co
   if (!metadata) return null;
   let graph: ComfyGraph | null;
   try {
-    const parsed = JSON.parse(metadata) as unknown;
+    // ComfyUI 偶发把 NaN / Infinity 写进 JSON（如 "is_changed": NaN），先清洗再解析
+    const src = metadata.replace(/:\s*(NaN|-?Infinity)\b/g, ": null");
+    const parsed = JSON.parse(src) as unknown;
     graph = normalizeComfyWorkflow(parsed);
   } catch {
     return null;
@@ -402,47 +404,74 @@ export function parseComfyUi(metadata: string | null, outputNodeId?: string): Co
       ? selected.order.map((id) => [id, graph[id]] as const)
       : (Object.entries(graph) as Array<[string, { class_type?: string; inputs?: Record<string, unknown> }]>);
 
-  // 递归解析节点文本：支持 Anima 自定义节点组合
-  //  - CLIPTextEncode.text 引用 JoinStringMulti / CR Prompt Text 等
-  //  - JoinStringMulti：拼接所有 string_N
-  //  - CR Prompt Text：读 prompt 字段
-  //  - ShowText|pysssss：读 text_0 字段
-  const resolveNodeText = (nodeId: string, depth = 0): string => {
+  // ── 角色传播式文本提取 ─────────────────────────────────────────────
+  // 不依赖具体节点名/字段名：从采样器 positive / negative 端口沿引用链反向
+  // 遍历，返回整条链路在给定角色下的文本。字段名点名角色时（如
+  // negative_prompt）以字段名为准；与当前链路角色相反的字段属另一条链路，
+  // 跳过避免污染。字段名叫什么、节点叫什么都能覆盖。
+  const POS_FIELD_RE = /^(positive|pos|positive_prompt|positive_cond|pos_prompt|positive_[a-z0-9]+)$/i;
+  const NEG_FIELD_RE = /^(negative|neg|uc|uncond|negative_prompt|negative_cond|neg_prompt|negative_[a-z0-9]+)$/i;
+  const TEXT_FIELD_RE =
+    /^(text(?:_[a-z0-9]+)?|prompt(?:_[a-z0-9]+)?|positive(?:_[a-z0-9]+)?|negative(?:_[a-z0-9]+)?|wildcard(?:_[a-z0-9]+)?|string(?:_[0-9]+)?|conditioning(?:_[0-9]+)?|uc|uncond)$/i;
+  // 结构性输入（数据流连线而非提示词文本），反向追溯时忽略
+  const SKIP_REF_RE =
+    /^(clip|model|vae|unet|samples?|images?|latent|latent_image|mask|denoise|seed|noise_seed|noise|steps|cfg|eta|start_at_step|end_at_step|add_noise|return_with_leftover_noise|sampler_name|scheduler|sam_model_opt|bbox_detector|segm_detector_opt|filename|filename_prefix|anything|guide|delimiter|clean_whitespace|aesthetic_score|scale|timestep_keyframe|keyframe|reference)$/i;
+
+  const isRef = (v: unknown): v is [string, number] =>
+    Array.isArray(v) && typeof v[0] === "string" && Boolean(graph[v[0]]);
+
+  // 返回 nodeId 子树在当前角色下的文本（拼接类按 delimiter 拼接，通用节点
+  // 本地文本字段 + 子引用按 ", " 合并），空则返回 ""
+  const resolveNodeText = (nodeId: string, role: "positive" | "negative", depth = 0): string => {
     if (depth > MAX_COMFY_DEPTH) return "";
     const n = graph[nodeId];
     if (!n) return "";
     const t = n.class_type ?? "";
+    // 调试/预览/展示类节点不参与文本收集（如 easy showAnything）
+    if (/showanything|debug|preview|saveimage|reroute|note\b|previewany|showtext/i.test(t)) return "";
     const inputs = (n.inputs ?? {}) as Record<string, unknown>;
-    // JoinStringMulti：拼接所有 string_N
+
+    // 拼接类节点：JoinStringMulti 按 string_N、Concatenate 按 text_a..z 拼接
     if (t.includes("JoinString") || t.includes("StringMulti")) {
       const parts: string[] = [];
       const delim = typeof inputs.delimiter === "string" ? inputs.delimiter : "";
       for (let i = 1; i <= 30; i++) {
         const v = inputs[`string_${i}`];
         if (v === undefined) break;
-        if (Array.isArray(v) && typeof v[0] === "string") parts.push(resolveNodeText(v[0], depth + 1));
-        else if (typeof v === "string") parts.push(v);
+        if (typeof v === "string") parts.push(v);
+        else if (isRef(v)) parts.push(resolveNodeText(v[0], role, depth + 1));
       }
       return parts.filter(Boolean).join(delim);
     }
-    // CR Prompt Text：读 prompt 字段
-    if (typeof inputs.prompt === "string") return inputs.prompt;
-    // 普通文本节点：text / text_0
-    if (typeof inputs.text === "string") return inputs.text;
-    if (typeof inputs.text_0 === "string") return inputs.text_0;
-    // text 是引用
-    if (Array.isArray(inputs.text) && typeof inputs.text[0] === "string") {
-      return resolveNodeText(inputs.text[0], depth + 1);
+    if (t.includes("Concatenate")) {
+      const parts: string[] = [];
+      const delim = typeof inputs.delimiter === "string" ? inputs.delimiter : "";
+      for (const [k, v] of Object.entries(inputs)) {
+        if (!/^text(?:_[a-z0-9]+)?$/i.test(k)) continue;
+        if (typeof v === "string") parts.push(v);
+        else if (isRef(v)) parts.push(resolveNodeText(v[0], role, depth + 1));
+      }
+      return parts.filter(Boolean).join(delim);
     }
-    return "";
-  };
 
-  // 取引用的节点文本（["nodeId", idx] 引用形式，递归解析）
-  const getTextByRef = (ref: unknown): string => {
-    if (Array.isArray(ref) && typeof ref[0] === "string") {
-      return resolveNodeText(ref[0]);
+    // 通用节点：本节点文本字段（角色匹配）+ 子引用文本
+    const local: string[] = [];
+    for (const [k, v] of Object.entries(inputs)) {
+      if (typeof v !== "string" || !v.trim()) continue;
+      if (!TEXT_FIELD_RE.test(k)) continue;
+      const r = NEG_FIELD_RE.test(k) ? "negative" : POS_FIELD_RE.test(k) ? "positive" : role;
+      if (r !== role) continue;
+      local.push(v.trim());
     }
-    return "";
+    for (const [k, v] of Object.entries(inputs)) {
+      if (SKIP_REF_RE.test(k)) continue;
+      if (!isRef(v)) continue;
+      const childRole = NEG_FIELD_RE.test(k) ? "negative" : POS_FIELD_RE.test(k) ? "positive" : role;
+      if (childRole !== role) continue;
+      const text = resolveNodeText(v[0], childRole, depth + 1);
+      if (text) local.push(text);
+    }
+    return local.join(", ");
   };
 
   // 取数字：直接数值，或跟随 ["nodeId", idx] 引用解析目标节点输入
@@ -509,37 +538,54 @@ export function parseComfyUi(metadata: string | null, outputNodeId?: string): Co
   let positive = "";
   let negative = "";
   if (samplerNode) {
-    positive = getTextByRef(samplerNode.inputs?.positive);
-    negative = getTextByRef(
-      samplerNode.inputs?.negative ??
-        (samplerNode.inputs as Record<string, unknown> | undefined)?.negative_cond,
-    );
+    const inputs = (samplerNode.inputs ?? {}) as Record<string, unknown>;
+    // 角色传播：沿 positive / negative 端口反向追溯（字段名点名角色优先）
+    const pos = Array.isArray(inputs.positive)
+      ? resolveNodeText(inputs.positive[0], "positive")
+      : typeof inputs.positive === "string"
+        ? inputs.positive
+        : "";
+    const negVal = (inputs as Record<string, unknown>).negative_cond;
+    const neg =
+      inputs.negative !== undefined
+        ? Array.isArray(inputs.negative)
+          ? resolveNodeText(inputs.negative[0], "negative")
+          : typeof inputs.negative === "string"
+            ? inputs.negative
+            : ""
+        : Array.isArray(negVal)
+          ? resolveNodeText(negVal[0], "negative")
+          : typeof negVal === "string"
+            ? negVal
+            : "";
+    if (pos) positive = pos;
+    if (neg) negative = neg;
   }
-  // 兜底：取任一 CLIPTextEncode 的 text，按负面特征词区分正反
+  // 兜底：无采样器引用时，从全图收集 CLIPTextEncode 文本并按负面特征词区分正反
   if (!positive && !negative) {
-    const texts: string[] = [];
+    const pool: string[] = [];
     for (const [, n] of entries) {
-      if (
-        (n?.class_type === "CLIPTextEncode" ||
-          n?.class_type === "CLIPTextEncodeAdvanced") &&
-        typeof n.inputs?.text === "string"
-      ) {
-        texts.push(n.inputs.text);
-      }
+      const inputs = (n.inputs ?? {}) as Record<string, unknown>;
+      if (!(n?.class_type === "CLIPTextEncode" || n?.class_type === "CLIPTextEncodeAdvanced")) continue;
+      const text =
+        typeof inputs.text === "string"
+          ? inputs.text
+          : isRef(inputs.text)
+            ? resolveNodeText(inputs.text[0], "positive")
+            : "";
+      if (text) pool.push(text);
     }
-    // 负面特征词命中较多的归 negative
     const NEG_PATTERN =
       /worst quality|low quality|score_[0-9]|bad anatomy|bad hands|deformed|jpeg artifacts|blurry|ugly|watermark|signature|extra (fingers|arms|legs|digit)/i;
-    const negTexts = texts.filter((t) => NEG_PATTERN.test(t));
-    if (negTexts.length > 0 && negTexts.length < texts.length) {
+    const negTexts = pool.filter((t) => NEG_PATTERN.test(t));
+    if (negTexts.length > 0) {
       negative = negTexts[0];
-      positive = texts.find((t) => t !== negative) ?? "";
-    } else if (texts.length >= 2) {
-      // 无法用特征判断：第一个当 positive，第二个当 negative
-      positive = texts[0];
-      negative = texts[1];
-    } else if (texts.length === 1) {
-      positive = texts[0];
+      positive = pool.find((t) => !NEG_PATTERN.test(t)) ?? "";
+    } else if (pool.length >= 2) {
+      positive = pool[0];
+      negative = pool[1];
+    } else if (pool.length === 1) {
+      positive = pool[0];
     }
   }
 

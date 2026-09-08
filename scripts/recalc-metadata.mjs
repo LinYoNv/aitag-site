@@ -129,44 +129,74 @@ export function parseComfyUi(metadata) {
   if (!metadata) return null;
   let graph;
   try {
-    const parsed = JSON.parse(metadata);
+    // ComfyUI 偶发把 NaN / Infinity 写进 JSON（如 "is_changed": NaN），先清洗再解析
+    const src = String(metadata).replace(/:\s*(NaN|-?Infinity)\b/g, ": null");
+    const parsed = JSON.parse(src);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
     graph = normalizeComfyWorkflow(parsed);
   } catch {
     return null;
   }
   const entries = Object.entries(graph);
-  // 递归解析节点文本（与 src/lib/png.ts resolveNodeText 同步）
-  const resolveNodeText = (nodeId, depth = 0) => {
-    if (depth > 6) return "";
+
+  // ── 角色传播式文本提取（与 src/lib/png.ts 同步）─────────────────────
+  const POS_FIELD_RE = /^(positive|pos|positive_prompt|positive_cond|pos_prompt|positive_[a-z0-9]+)$/i;
+  const NEG_FIELD_RE = /^(negative|neg|uc|uncond|negative_prompt|negative_cond|neg_prompt|negative_[a-z0-9]+)$/i;
+  const TEXT_FIELD_RE =
+    /^(text(?:_[a-z0-9]+)?|prompt(?:_[a-z0-9]+)?|positive(?:_[a-z0-9]+)?|negative(?:_[a-z0-9]+)?|wildcard(?:_[a-z0-9]+)?|string(?:_[0-9]+)?|conditioning(?:_[0-9]+)?|uc|uncond)$/i;
+  const SKIP_REF_RE =
+    /^(clip|model|vae|unet|samples?|images?|latent|latent_image|mask|denoise|seed|noise_seed|noise|steps|cfg|eta|start_at_step|end_at_step|add_noise|return_with_leftover_noise|sampler_name|scheduler|sam_model_opt|bbox_detector|segm_detector_opt|filename|filename_prefix|anything|guide|delimiter|clean_whitespace|aesthetic_score|scale|timestep_keyframe|keyframe|reference)$/i;
+
+  const isRef = (v) =>
+    Array.isArray(v) && typeof v[0] === "string" && Boolean(graph[v[0]]);
+
+  const resolveNodeText = (nodeId, role, depth = 0) => {
+    if (depth > 100) return "";
     const n = graph[nodeId];
     if (!n) return "";
     const t = n.class_type ?? "";
+    if (/showanything|debug|preview|saveimage|reroute|note\b|previewany|showtext/i.test(t)) return "";
     const inputs = n.inputs ?? {};
+
     if (t.includes("JoinString") || t.includes("StringMulti")) {
       const parts = [];
       const delim = typeof inputs.delimiter === "string" ? inputs.delimiter : "";
       for (let i = 1; i <= 30; i++) {
         const v = inputs[`string_${i}`];
         if (v === undefined) break;
-        if (Array.isArray(v) && typeof v[0] === "string") parts.push(resolveNodeText(v[0], depth + 1));
-        else if (typeof v === "string") parts.push(v);
+        if (typeof v === "string") parts.push(v);
+        else if (isRef(v)) parts.push(resolveNodeText(v[0], role, depth + 1));
       }
       return parts.filter(Boolean).join(delim);
     }
-    if (typeof inputs.prompt === "string") return inputs.prompt;
-    if (typeof inputs.text === "string") return inputs.text;
-    if (typeof inputs.text_0 === "string") return inputs.text_0;
-    if (Array.isArray(inputs.text) && typeof inputs.text[0] === "string") {
-      return resolveNodeText(inputs.text[0], depth + 1);
+    if (t.includes("Concatenate")) {
+      const parts = [];
+      const delim = typeof inputs.delimiter === "string" ? inputs.delimiter : "";
+      for (const [k, v] of Object.entries(inputs)) {
+        if (!/^text(?:_[a-z0-9]+)?$/i.test(k)) continue;
+        if (typeof v === "string") parts.push(v);
+        else if (isRef(v)) parts.push(resolveNodeText(v[0], role, depth + 1));
+      }
+      return parts.filter(Boolean).join(delim);
     }
-    return "";
-  };
-  const getTextByRef = (ref) => {
-    if (Array.isArray(ref) && typeof ref[0] === "string") {
-      return resolveNodeText(ref[0]);
+
+    const local = [];
+    for (const [k, v] of Object.entries(inputs)) {
+      if (typeof v !== "string" || !String(v).trim()) continue;
+      if (!TEXT_FIELD_RE.test(k)) continue;
+      const r = NEG_FIELD_RE.test(k) ? "negative" : POS_FIELD_RE.test(k) ? "positive" : role;
+      if (r !== role) continue;
+      local.push(String(v).trim());
     }
-    return "";
+    for (const [k, v] of Object.entries(inputs)) {
+      if (SKIP_REF_RE.test(k)) continue;
+      if (!isRef(v)) continue;
+      const childRole = NEG_FIELD_RE.test(k) ? "negative" : POS_FIELD_RE.test(k) ? "positive" : role;
+      if (childRole !== role) continue;
+      const text = resolveNodeText(v[0], childRole, depth + 1);
+      if (text) local.push(text);
+    }
+    return local.join(", ");
   };
   const getNumByRef = (ref) => {
     if (typeof ref === "number") return ref;
@@ -217,28 +247,52 @@ export function parseComfyUi(metadata) {
   let positive = "";
   let negative = "";
   if (samplerNode) {
-    positive = getTextByRef(samplerNode.inputs?.positive);
-    negative = getTextByRef(samplerNode.inputs?.negative ?? samplerNode.inputs?.negative_cond);
+    const inputs = samplerNode.inputs ?? {};
+    const pos = Array.isArray(inputs.positive)
+      ? resolveNodeText(inputs.positive[0], "positive")
+      : typeof inputs.positive === "string"
+        ? inputs.positive
+        : "";
+    const negVal = inputs.negative_cond;
+    const neg =
+      inputs.negative !== undefined
+        ? Array.isArray(inputs.negative)
+          ? resolveNodeText(inputs.negative[0], "negative")
+          : typeof inputs.negative === "string"
+            ? inputs.negative
+            : ""
+        : Array.isArray(negVal)
+          ? resolveNodeText(negVal[0], "negative")
+          : typeof negVal === "string"
+            ? negVal
+            : "";
+    if (pos) positive = pos;
+    if (neg) negative = neg;
   }
   if (!positive && !negative) {
-    const texts = [];
+    const pool = [];
     for (const [, n] of entries) {
-      if ((n?.class_type === "CLIPTextEncode" || n?.class_type === "CLIPTextEncodeAdvanced") &&
-        typeof n.inputs?.text === "string") {
-        texts.push(n.inputs.text);
-      }
+      const inputs = n?.inputs ?? {};
+      if (!(n?.class_type === "CLIPTextEncode" || n?.class_type === "CLIPTextEncodeAdvanced")) continue;
+      const text =
+        typeof inputs.text === "string"
+          ? inputs.text
+          : isRef(inputs.text)
+            ? resolveNodeText(inputs.text[0], "positive")
+            : "";
+      if (text) pool.push(text);
     }
     const NEG_PATTERN =
       /worst quality|low quality|score_[0-9]|bad anatomy|bad hands|deformed|jpeg artifacts|blurry|ugly|watermark|signature|extra (fingers|arms|legs|digit)/i;
-    const negTexts = texts.filter((t) => NEG_PATTERN.test(t));
-    if (negTexts.length > 0 && negTexts.length < texts.length) {
+    const negTexts = pool.filter((t) => NEG_PATTERN.test(t));
+    if (negTexts.length > 0) {
       negative = negTexts[0];
-      positive = texts.find((t) => t !== negative) ?? "";
-    } else if (texts.length >= 2) {
-      positive = texts[0];
-      negative = texts[1];
-    } else if (texts.length === 1) {
-      positive = texts[0];
+      positive = pool.find((t) => !NEG_PATTERN.test(t)) ?? "";
+    } else if (pool.length >= 2) {
+      positive = pool[0];
+      negative = pool[1];
+    } else if (pool.length === 1) {
+      positive = pool[0];
     }
   }
   const sampler = String(samplerNode?.inputs?.sampler_name ?? samplerNode?.inputs?.sampler ?? "");

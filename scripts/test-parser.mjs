@@ -146,6 +146,41 @@ try {
   assert.equal(traced.steps, 30, "应从活跃采样器取 steps");
   assert.equal(traced.cfg, 6, "应从活跃采样器取 cfg");
   assert.equal(traced.seed, 0, "应从活跃采样器取 seed");
+
+  // ── 回归：WeiLin 提示词编辑器（正向在 positive 字段，非 text）──
+  const weilin = {
+    "55": { class_type: "CLIPTextEncode", inputs: { text: "blurry, hands" } },
+    "66": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ckpt.safetensors" } },
+    "73": { class_type: "WeiLinPromptUIWithoutLora", inputs: { positive: "masterpiece, (1girl:1.5), solo", seed: 1, steps: 32 } },
+    "76": { class_type: "KSampler", inputs: { positive: ["73", 0], negative: ["55", 0], model: ["66", 0], seed: 1, steps: 32, cfg: 2.4, sampler_name: "dpmpp_2m" } },
+    "113": { class_type: "SaveImage", inputs: { images: ["76", 0] } },
+  };
+  const weilinParsed = parseComfyUi(JSON.stringify(weilin));
+  assert.ok(weilinParsed);
+  assert.equal(weilinParsed.prompt, "masterpiece, (1girl:1.5), solo", "应从 positive 字段提取正向");
+  assert.equal(weilinParsed.negativePrompt, "blurry, hands", "负向仍来自 CLIPTextEncode.text");
+
+  // ── 回归：Text Concatenate 拼接链（text_a/text_b/text_c 引用）──
+  const concat = {
+    "66": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ckpt.safetensors" } },
+    "169": { class_type: "TextInput_", inputs: { text: "masterpiece," } },
+    "170": { class_type: "TextInput_", inputs: { text: "1girl" } },
+    "73": { class_type: "Text Concatenate", inputs: { delimiter: ", ", text_a: ["169", 0], text_b: ["170", 0] } },
+    "67": { class_type: "CLIPTextEncode", inputs: { text: ["73", 0], clip: ["66", 1] } },
+    "58": { class_type: "CLIPTextEncode", inputs: { text: "bad quality", clip: ["66", 1] } },
+    "209": { class_type: "KSampler", inputs: { positive: ["67", 0], negative: ["58", 0], model: ["66", 0], seed: 1, steps: 35, cfg: 6, sampler_name: "euler" } },
+    "211": { class_type: "SaveImage", inputs: { images: ["209", 0] } },
+  };
+  const concatParsed = parseComfyUi(JSON.stringify(concat));
+  assert.ok(concatParsed);
+  assert.ok(concatParsed.prompt.includes("masterpiece,"), `拼接链应含首段, got: ${concatParsed.prompt}`);
+  assert.ok(concatParsed.prompt.includes("1girl"), "拼接链应含中段");
+
+  // ── 回归：NaN 非法令牌容错（ComfyUI 会把 is_changed: NaN 写进 JSON）──
+  const nanWorkflow = `{"66":{"class_type":"CheckpointLoaderSimple","inputs":{"ckpt_name":"ckpt.safetensors"}},"2":{"class_type":"CLIPTextEncode","inputs":{"text":"a girl"}},"3":{"class_type":"CLIPTextEncode","inputs":{"text":"bad anatomy"}},"4":{"class_type":"KSampler","inputs":{"positive":["2",0],"negative":["3",0],"model":["66",0],"seed":1,"steps":28,"cfg":7}},"is_changed":NaN}`;
+  const nanParsed = parseComfyUi(nanWorkflow);
+  assert.ok(nanParsed, "含 NaN 令牌不应崩溃");
+  assert.equal(nanParsed.prompt, "a girl");
   console.log("parser tests passed");
 } finally {
   fs.rmSync(temp, { recursive: true, force: true });
