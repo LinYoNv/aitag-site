@@ -6,6 +6,7 @@ import type { Work } from "@/lib/types";
 import { typeLabel, typeClass, formatDate } from "@/lib/format";
 import { getPerImageMetas } from "@/lib/types";
 import CardMetaView from "@/components/CardMetaView";
+import Lightbox from "@/components/Lightbox";
 
 interface Props {
   work: Work;
@@ -22,6 +23,8 @@ export default function WorkDetailClient({ work, canDelete, isAdmin }: Props) {
   const [bookmarks, setBookmarks] = useState(work.total_bookmarks ?? 0);
   const [views, setViews] = useState(work.total_view ?? 0);
   const [actionMsg, setActionMsg] = useState("");
+  // 灯箱：当前打开的图片下标（null = 关闭）
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const perImages = getPerImageMetas(work.metadata);
   const images = work.images.length > 0 ? work.images : [];
   const multi = images.length > 1;
@@ -242,16 +245,24 @@ export default function WorkDetailClient({ work, canDelete, isAdmin }: Props) {
           )}
         </div>
 
-        {/* 图片区：单图放大显示，多图一排最多三张（参照 aitag.win） */}
+        {/* 图片区：单图放大显示，多图一排最多三张（参照 aitag.win）；点图开灯箱 */}
         {images.length > 0 ? (
           <div className={`detail-images ${multi ? "" : "single"}`}>
             {images.map((img, i) => (
               <div key={img} className="img-card">
-                <img
-                  src={img}
-                  alt={`${work.title || work.id} ${i + 1}`}
-                  loading="lazy"
-                />
+                <button
+                  type="button"
+                  className="img-card__open"
+                  onClick={() => setLightboxIndex(i)}
+                  aria-label={`放大查看图片 ${i + 1}`}
+                  title="点击放大查看"
+                >
+                  <img
+                    src={img}
+                    alt={`${work.title || work.id} ${i + 1}`}
+                    loading="lazy"
+                  />
+                </button>
                 <CardMetaView
                   data={metaForImage(i)}
                   index={multi ? i : undefined}
@@ -265,6 +276,15 @@ export default function WorkDetailClient({ work, canDelete, isAdmin }: Props) {
           </div>
         )}
       </main>
+
+      {/* 灯箱：点击图片打开，←→/触屏切换，Esc/点遮罩关闭 */}
+      <Lightbox
+        images={images}
+        index={lightboxIndex}
+        title={`${work.title || work.id}`}
+        onClose={() => setLightboxIndex(null)}
+        onNavigate={setLightboxIndex}
+      />
     </div>
   );
 }
