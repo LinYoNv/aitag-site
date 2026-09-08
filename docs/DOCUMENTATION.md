@@ -21,51 +21,35 @@
 
 ## 2. 运行与访问
 
+> ⚠️ 本表只保留**脱敏**信息（公开仓库可见）。真实 IP、服务器路径、systemd 单元、Caddyfile 等运维细节见服务器本地文档 `DEV_NOTES.md`（不提交）。管理员凭据见服务器本地的 `.admin-cred.tmp`。
+
 | 项 | 值 |
 |---|---|
-| 生产部署（hk3 服务器 45.207.220.205） | `/root/aitag-deploy/`（standalone，systemd 服务 `aitag-site.service` 监听 **127.0.0.1:3101** 内部端口） |
-| 源码（本机） | `/root/Ai-works/aitag-site/`（git 仓库，remote=GitHub `LinYoNv/aitag-site`） |
-| **HTTPS 域名**（Caddy 反代 + Cloudflare 灰云） | **`https://juocho.kdns.fr`**（DNS A=45.207.220.205） |
-| 线上数据库 | `/root/aitag-deploy/data/aitag.db`（hk3） |
-| Node 版本 | hk3 v24.20.0；本机 v24.19.0（均内置 `node:sqlite`） |
+| 生产部署（Linux 服务器） | `<部署目录>/`（Next standalone，systemd 服务监听 **127.0.0.1** 内部端口） |
+| 源码（本机） | `<本地源码目录>/`（git 仓库，remote=GitHub `LinYoNv/aitag-site`，仅提交源码，/data /public/images 不入库） |
+| **HTTPS 域名**（Caddy 反代 + Cloudflare 灰云） | **`https://juocho.kdns.fr`** |
+| 线上数据库 | `<部署目录>/data/aitag.db` |
+| Node 版本 | 生产机与本机均 v24+（内置 `node:sqlite`） |
 
-**HTTPS 反向代理（hk3，2026-09-03）**：
-- 装了 **Caddy 2.6.2**（`/usr/bin/caddy`，systemd `caddy.service`）
-- Caddyfile：`/etc/caddy/Caddyfile`（备份 `/etc/caddy/Caddyfile.bak`）
-  ```caddy
-  {
-    email admin@juocho.kdns.fr
-  }
-  juocho.kdns.fr {          # 443 HTTPS
-    encode gzip
-    reverse_proxy 127.0.0.1:3101
-  }
-  juocho.kdns.fr:3100 {     # 保留 :3100 HTTPS
-    encode gzip
-    reverse_proxy 127.0.0.1:3101
-  }
-  ```
-- **Next 内部端口改为 3101**（原 3100 让给 Caddy）：`/etc/systemd/system/aitag-site.service` 的 `Environment=PORT=3101`（备份 `/root/aitag-site.service.bak`）
-- Let's Encrypt 自动签发/续期 `CN=juocho.kdns.fr`，443 和 3100 同证
-- `http://juocho.kdns.fr`(80) → 308 跳 HTTPS；3100 明文 HTTP → 400（只走 TLS）
+**HTTPS 反向代理**：Caddy 反代 443 → Next standalone 内部端口；Cloudflare 灰云解析域名到源站。Let's Encrypt 自动签发/续期证书。
 
-**hk3 服务管理**：
+**服务管理**（服务器本机）：
 ```bash
-systemctl status aitag-site     # Next 站本身（内部端口 3101）
-systemctl status caddy          # HTTPS 反代（3100 + 443）
+systemctl status aitag-site     # Next 站本身（内部端口）
+systemctl status caddy          # HTTPS 反代（443）
 systemctl restart aitag-site    # 部署新构建后重启 Next
 systemctl reload caddy          # 改 Caddyfile 后重载
 ```
-systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/root/aitag-deploy`，`ExecStart=/usr/local/bin/node server.js`，`Environment=PORT=3101`（内部端口），`Restart=always`。Caddy 监听 3100+443 反代到 `127.0.0.1:3101`。
 
 **部署流程（改代码后上线）**：
-1. 容器内改代码 → `npx next build`
+1. 本机改代码 → `npx next build`
 2. `git add -A && git commit && git push origin main`
-3. hk3：`cd /root/aitag-site && git pull origin main && npx next build`
-4. hk3 部署：`rm -rf /root/aitag-deploy/.next && cp -r .next/standalone/.next /root/aitag-deploy/.next && cp .next/standalone/server.js /root/aitag-deploy/server.js && mkdir -p /root/aitag-deploy/.next/static && cp -r .next/static/. /root/aitag-deploy/.next/static/`
-5. `systemctl restart aitag-site`（Caddy 无需动，仍反代 3101）
-⚠️ **必须拷 `.next/static`**（standalone 产物不含它）；⚠️ **不要覆盖** `/root/aitag-deploy/data/` 与 `public/images/`（用户数据）。
-💡 访问入口：`https://juocho.kdns.fr` 或 `https://juocho.kdns.fr:3100`。
+3. 服务器：`cd <源码目录> && git pull origin main && npx next build`
+4. 服务器部署：`rm -rf <部署目录>/.next && cp -r .next/standalone/.next <部署目录>/.next && cp .next/standalone/server.js <部署目录>/server.js && rm -rf <部署目录>/node_modules && cp -r .next/standalone/node_modules <部署目录>/node_modules && mkdir -p <部署目录>/.next/static && cp -r .next/static/. <部署目录>/.next/static/`
+5. `systemctl restart aitag-site`（Caddy 无需动，仍反代内部端口）
+⚠️ **必须拷 `.next/static`**（standalone 产物不含它）；⚠️ **不要覆盖** `<部署目录>/data/` 与 `public/images/`（用户数据）。
+💡 访问入口：`https://juocho.kdns.fr`。
+💡 健康检查：`curl -s -o /dev/null -w "%{http_code}" https://juocho.kdns.fr/login`（预期 200；**接口均需登录**，不要用 `/api/*` 做健康检查）。
 
 ---
 
@@ -234,7 +218,7 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 
 ---
 
-## 6. 文件用途（源码 `/root/Ai-works/aitag-site`）
+## 6. 文件用途（源码 `<本地源码目录>`）
 
 ### 入口与页面（`src/app/`）
 | 文件 | 用途 |
@@ -322,10 +306,12 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 
 ## 8. 账号与环境
 
-- **admin**：用户名 `admin`，密码存容器 `/root/dsh-work/.admin-cred.tmp`（chmod 600，内容 `ADMIN_PASS=<pass>`）；hk3 生产库已有该账号（role=admin）。
-- **hk3 生产机（45.207.220.205）DB**：`/root/aitag-deploy/data/aitag.db`（40 条作品，21 个用户；含 users/sessions/user_actions/view_logs 表）。域名 `juocho.kdns.fr` 走 Cloudflare 灰云解析到该机。
-- **GitHub**：`https://github.com/LinYoNv/aitag-site`，分支 `main`；推送用 `http://127.0.0.1:7897` 代理 + 凭据 helper（一次性注入）。
-- **API 测试小抄**（hk3 本机）：注册→登录→me→上传→登出，见 `login-register-progress.md` §自测。
+> ⚠️ 本节只保留**脱敏**信息。管理员密码、生产机登录方式、Git 推送凭据、数据库实际路径等运维细节见服务器本地 `DEV_NOTES.md`（不提交）。
+
+- **admin**：用户名 `admin`，role=admin（生产库已有该账号；密码存服务器本地凭据文件，chmod 600，不提交仓库）。
+- **生产 DB**：`<部署目录>/data/aitag.db`（40 条作品，21 个用户；含 users/sessions/user_actions/view_logs 表）。域名 `juocho.kdns.fr` 走 Cloudflare 灰云解析。
+- **GitHub**：`https://github.com/LinYoNv/aitag-site`，分支 `main`；推送用本地代理 + 一次性凭据 helper（详见 DEV_NOTES.md）。
+- **API 测试小抄**：注册→登录→me→上传→登出，见 `login-register-progress.md` §自测。
 
 ---
 

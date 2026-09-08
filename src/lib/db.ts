@@ -124,6 +124,25 @@ function rowToWork(row: Record<string, unknown>): Work {
   };
 }
 
+/** Work → WorkListItem（列表卡片用缩略图，详情页仍用原图 /api/images/） */
+function toListItem(w: Work): WorkListItem {
+  return {
+    id: w.id,
+    title: w.title,
+    caption: w.caption,
+    create_date: w.create_date,
+    ai_type: w.ai_type,
+    image_count: w.image_count,
+    tags: w.tags,
+    author_name: w.author_name,
+    total_view: w.total_view,
+    total_bookmarks: w.total_bookmarks,
+    cover: w.images[0]
+      ? w.images[0].replace("/api/images/", "/api/images/thumb/")
+      : "",
+  };
+}
+
 export function insertWork(work: Work): void {
   const d = getDb();
   d.prepare(
@@ -162,10 +181,25 @@ export function recordView(userId: string, workId: string, windowMs = 10 * 60 * 
       | undefined;
     return Number(row?.total_view ?? 0);
   }
-  d.prepare(
-    "INSERT INTO view_logs (user_id, work_id, create_date) VALUES (?, ?, ?)",
-  ).run(userId, workId, new Date().toISOString());
-  d.prepare("UPDATE works SET total_view = total_view + 1 WHERE id = ?").run(workId);
+  // 插日志 + 更新计数放同一事务，防部分失败导致计数与日志永久不一致
+  d.exec("BEGIN IMMEDIATE");
+  try {
+    d.prepare(
+      "INSERT INTO view_logs (user_id, work_id, create_date) VALUES (?, ?, ?)",
+    ).run(userId, workId, new Date().toISOString());
+    d.prepare("UPDATE works SET total_view = total_view + 1 WHERE id = ?").run(workId);
+    d.exec("COMMIT");
+  } catch (e) {
+    d.exec("ROLLBACK");
+    throw e;
+  }
+  // F14a：低频顺手清理 7 天前的浏览日志（去重只看窗口内记录，删旧日志不影响正确性）
+  if (Math.random() < 0.01) {
+    try {
+      d.prepare(`DELETE FROM view_logs WHERE create_date < ?`)
+        .run(new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString());
+    } catch { /* 清理失败不影响主流程 */ }
+  }
   const row = d.prepare("SELECT total_view FROM works WHERE id = ?").get(workId) as
     | { total_view: number }
     | undefined;
@@ -181,27 +215,36 @@ export function toggleAction(
 ): { active: boolean; count: number } {
   const d = getDb();
   const col = action === "like" ? "total_likes" : "total_bookmarks";
-  const existing = d
-    .prepare("SELECT 1 FROM user_actions WHERE user_id = ? AND work_id = ? AND action = ?")
-    .get(userId, workId, action);
-  if (existing) {
-    d.prepare("DELETE FROM user_actions WHERE user_id = ? AND work_id = ? AND action = ?").run(
-      userId, workId, action,
-    );
-    d.prepare(`UPDATE works SET ${col} = MAX(0, ${col} - 1) WHERE id = ?`).run(workId);
+  // 记录表写入与计数更新放同一事务，防部分失败导致两者永久不一致
+  d.exec("BEGIN IMMEDIATE");
+  try {
+    const existing = d
+      .prepare("SELECT 1 FROM user_actions WHERE user_id = ? AND work_id = ? AND action = ?")
+      .get(userId, workId, action);
+    if (existing) {
+      d.prepare("DELETE FROM user_actions WHERE user_id = ? AND work_id = ? AND action = ?").run(
+        userId, workId, action,
+      );
+      d.prepare(`UPDATE works SET ${col} = MAX(0, ${col} - 1) WHERE id = ?`).run(workId);
+      const row = d.prepare(`SELECT ${col} AS c FROM works WHERE id = ?`).get(workId) as
+        | { c: number }
+        | undefined;
+      d.exec("COMMIT");
+      return { active: false, count: Number(row?.c ?? 0) };
+    }
+    d.prepare(
+      "INSERT INTO user_actions (user_id, work_id, action, create_date) VALUES (?, ?, ?, ?)",
+    ).run(userId, workId, action, new Date().toISOString());
+    d.prepare(`UPDATE works SET ${col} = ${col} + 1 WHERE id = ?`).run(workId);
     const row = d.prepare(`SELECT ${col} AS c FROM works WHERE id = ?`).get(workId) as
       | { c: number }
       | undefined;
-    return { active: false, count: Number(row?.c ?? 0) };
+    d.exec("COMMIT");
+    return { active: true, count: Number(row?.c ?? 0) };
+  } catch (e) {
+    d.exec("ROLLBACK");
+    throw e;
   }
-  d.prepare(
-    "INSERT INTO user_actions (user_id, work_id, action, create_date) VALUES (?, ?, ?, ?)",
-  ).run(userId, workId, action, new Date().toISOString());
-  d.prepare(`UPDATE works SET ${col} = ${col} + 1 WHERE id = ?`).run(workId);
-  const row = d.prepare(`SELECT ${col} AS c FROM works WHERE id = ?`).get(workId) as
-    | { c: number }
-    | undefined;
-  return { active: true, count: Number(row?.c ?? 0) };
 }
 
 // 查询某用户对某个作品的点赞/收藏状态
@@ -248,12 +291,14 @@ export function listWorks(opts: {
   const params: Array<string | number> = [];
 
   if (opts.q) {
-    // 转义 LIKE 通配符（% _ \），仅用于 metadata 的 prompt 匹配
+    // 全部字段统一转义 LIKE 通配符（% _ \），并逐表达式带 ESCAPE ——
+    // 否则搜 "100%" 之类的词会在未转义通道全表匹配
     const escQ = opts.q.replace(/[\\%_]/g, (c) => "\\" + c);
     where.push(
-      "(title LIKE ? OR caption LIKE ? OR author_name LIKE ? OR id LIKE ? OR tags LIKE ? OR metadata LIKE ? ESCAPE '\\')",
+      "(title LIKE ? ESCAPE '\\' OR caption LIKE ? ESCAPE '\\' OR author_name LIKE ? ESCAPE '\\' " +
+        "OR id LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\' OR metadata LIKE ? ESCAPE '\\')",
     );
-    const like = `%${opts.q}%`;
+    const like = `%${escQ}%`;
     // 正向 prompt（"prompt": 键，含 per_image/_raw 存档）也参与搜索，与屏蔽 tag 同口径
     params.push(like, like, like, like, like, `%"prompt":%${escQ}%`);
   }
@@ -312,25 +357,7 @@ export function listWorks(opts: {
     unknown
   >[];
 
-  const items: WorkListItem[] = rows.map((r) => {
-    const w = rowToWork(r);
-    return {
-      id: w.id,
-      title: w.title,
-      caption: w.caption,
-      create_date: w.create_date,
-      ai_type: w.ai_type,
-      image_count: w.image_count,
-      tags: w.tags,
-      author_name: w.author_name,
-      total_view: w.total_view,
-      total_bookmarks: w.total_bookmarks,
-      // 列表卡片用缩略图（480px WebP），详情页仍用原图 /api/images/
-      cover: w.images[0]
-        ? w.images[0].replace("/api/images/", "/api/images/thumb/")
-        : "",
-    };
-  });
+  const items: WorkListItem[] = rows.map((r) => toListItem(rowToWork(r)));
 
   return {
     items,
@@ -394,25 +421,7 @@ export function listBookmarkedWorks(
        LIMIT ? OFFSET ?`,
     )
     .all(userId, size, (page2 - 1) * size) as Record<string, unknown>[];
-  const items: WorkListItem[] = rows.map((r) => {
-    const w = rowToWork(r);
-    return {
-      id: w.id,
-      title: w.title,
-      caption: w.caption,
-      create_date: w.create_date,
-      ai_type: w.ai_type,
-      image_count: w.image_count,
-      tags: w.tags,
-      author_name: w.author_name,
-      total_view: w.total_view,
-      total_bookmarks: w.total_bookmarks,
-      // 列表卡片用缩略图（480px WebP），详情页仍用原图 /api/images/
-      cover: w.images[0]
-        ? w.images[0].replace("/api/images/", "/api/images/thumb/")
-        : "",
-    };
-  });
+  const items: WorkListItem[] = rows.map((r) => toListItem(rowToWork(r)));
   return {
     items,
     page: page2,
@@ -420,34 +429,6 @@ export function listBookmarkedWorks(
     total,
     total_pages: Math.ceil(total / size),
   };
-}
-
-export function getMonthlyRank(limit = 20): WorkListItem[] {
-  const d = getDb();
-  const rows = d
-    .prepare(
-      `SELECT * FROM works ORDER BY total_bookmarks DESC, total_view DESC, create_date DESC LIMIT ?`,
-    )
-    .all(limit) as Record<string, unknown>[];
-  return rows.map((r) => {
-    const w = rowToWork(r);
-    return {
-      id: w.id,
-      title: w.title,
-      caption: w.caption,
-      create_date: w.create_date,
-      ai_type: w.ai_type,
-      image_count: w.image_count,
-      tags: w.tags,
-      author_name: w.author_name,
-      total_view: w.total_view,
-      total_bookmarks: w.total_bookmarks,
-      // 列表卡片用缩略图（480px WebP），详情页仍用原图 /api/images/
-      cover: w.images[0]
-        ? w.images[0].replace("/api/images/", "/api/images/thumb/")
-        : "",
-    };
-  });
 }
 
 // ===== 用户 & 会话 =====
@@ -473,8 +454,10 @@ export function createUser(user: {
   avatar?: string;
 }): void {
   const d = getDb();
+  // 不用 OR IGNORE：让 UNIQUE 约束冲突抛出，由调用方（registerUser）捕获转成友好错误，
+  // 避免并发注册同名时静默吞掉、随后非空断言崩溃
   d.prepare(
-    `INSERT OR IGNORE INTO users (id, username, password_hash, role, author_name, avatar, create_date)
+    `INSERT INTO users (id, username, password_hash, role, author_name, avatar, create_date)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     user.id,
@@ -546,6 +529,8 @@ export function getUserById(id: string): UserRow | null {
 export function createSession(token: string, userId: string, ttlMs: number): void {
   const d = getDb();
   const now = Date.now();
+  // 顺手清理过期 session（防止无限累积；低频 DELETE，量小无碍）
+  d.prepare(`DELETE FROM sessions WHERE expire_date <= ?`).run(new Date(now).toISOString());
   d.prepare(
     `INSERT INTO sessions (token, user_id, create_date, expire_date) VALUES (?, ?, ?, ?)`,
   ).run(token, userId, new Date(now).toISOString(), new Date(now + ttlMs).toISOString());
@@ -575,6 +560,23 @@ export function deleteWorkById(id: string): { deleted: boolean; authorName: stri
   if (!work) return { deleted: false, authorName: "" };
   const res = d.prepare("DELETE FROM works WHERE id = ?").run(id);
   return { deleted: Number(res.changes) > 0, authorName: work.author_name };
+}
+
+/** 统计除 excludeWorkId 外，还有多少作品引用了某图片文件名（内容去重共享判断） */
+export function countOtherImageReferences(filename: string, excludeWorkId: string): number {
+  const d = getDb();
+  // 文件名是 hex hash + 扩展名，无 LIKE 通配符，无需转义
+  const row = d
+    .prepare(`SELECT COUNT(*) AS c FROM works WHERE id != ? AND images LIKE ?`)
+    .get(excludeWorkId, `%${filename}%`) as { c: number };
+  return row.c;
+}
+
+/** 删除作品时清理其互动记录（user_actions / view_logs） */
+export function deleteWorkSideRecords(workId: string): void {
+  const d = getDb();
+  d.prepare(`DELETE FROM user_actions WHERE work_id = ?`).run(workId);
+  d.prepare(`DELETE FROM view_logs WHERE work_id = ?`).run(workId);
 }
 
 export function workExists(id: string): boolean {

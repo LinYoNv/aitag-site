@@ -43,3 +43,12 @@ next-env.d.ts
 # 运行时数据（图片、数据库）——不提交，迁移时单独处理
 /public/images/
 /data/
+
+# 本地运维文档（含服务器 IP/路径/代理拓扑等敏感信息，不提交公开仓库）
+/DEPLOY.md
+/docs/HANDOFF.md
+/docs/ENVIRONMENT-NOTES.md
+/docs/login-register-progress.md
+/docs/notes/
+/DEV_NOTES.md
+/REF_IMAGE_STUDIO.md

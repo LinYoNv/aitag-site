@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getWorkById, deleteWorkById } from "@/lib/db";
+import {
+  getWorkById,
+  deleteWorkById,
+  countOtherImageReferences,
+  deleteWorkSideRecords,
+} from "@/lib/db";
 import { currentUser } from "@/lib/auth";
 import { extractArtistsFromPrompt } from "@/lib/png";
 
@@ -66,24 +71,39 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "删除失败" }, { status: 500 });
   }
 
-  // 同时删除对应图片文件（尽力而为，失败不影响）
+  // 同时删除对应图片文件（尽力而为，失败不影响）。
+  // 注意：A3 内容去重后文件名是 SHA-256 内容哈希，相同图片全站只存一份文件；
+  // 删除前必须确认没有其他作品引用同一文件，否则会误删共享图片导致他人作品 404。
   try {
     const fs = await import("node:fs");
     const path = await import("node:path");
     for (const img of work.images) {
+      const name = path.basename(img);
+      // 内容去重：仍被其他作品引用的文件不删
+      if (countOtherImageReferences(name, id) > 0) continue;
+
       // /api/images/xxx → data/uploads/xxx；/images/uploads/xxx → public/images/uploads/xxx
-      let filePath: string | null = null;
       if (img.startsWith("/api/images/")) {
-        filePath = path.join(process.cwd(), "data", "uploads", path.basename(img));
+        const filePath = path.join(process.cwd(), "data", "uploads", name);
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        // 顺带清理缩略图缓存（thumb/<去扩展名>.webp，若存在）
+        const base = path.basename(name, path.extname(name));
+        const thumb = path.join(process.cwd(), "data", "uploads", "thumb", `${base}.webp`);
+        if (fs.existsSync(thumb)) fs.unlinkSync(thumb);
       } else if (img.startsWith("/images/uploads/")) {
-        filePath = path.join(process.cwd(), "public", "images", "uploads", path.basename(img));
-      }
-      if (filePath && fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+        const filePath = path.join(process.cwd(), "public", "images", "uploads", name);
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
       }
     }
   } catch (e) {
     console.error("删除图片文件失败:", e);
+  }
+
+  // 清理互动记录（点赞/收藏/浏览），避免孤儿数据
+  try {
+    deleteWorkSideRecords(id);
+  } catch (e) {
+    console.error("清理互动记录失败:", e);
   }
 
   return NextResponse.json({ ok: true });

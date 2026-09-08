@@ -7,12 +7,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node scripts/test-parser.mjs"
+    "test": "node --import tsx --test \"tests/*.test.ts\"",
+    "test:parser": "node scripts/test-parser.mjs"
   },
   "dependencies": {
     "next": "15.5.25",
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-dom": "19.1.0",
+    "sharp": "0.35.4"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
@@ -23,6 +25,8 @@
     "eslint": "^9",
     "eslint-config-next": "15.5.25",
     "tailwindcss": "^4",
+    "tsx": "^4.23.13",
+    "tsx": "^4.23.0",
     "typescript": "^5"
   }
 }

@@ -44,12 +44,22 @@ export function registerUser(
   if (name.length > 30) return { ok: false, error: "用户名最长 30 字符" };
   if (!/^[a-zA-Z0-9_\u4e00-\u9fa5]+$/.test(name))
     return { ok: false, error: "用户名只能包含字母、数字、下划线、中文" };
-  if (!password || password.length < 4) return { ok: false, error: "密码至少 4 位" };
+  // 反馈前端已有的快捷注册不再可用：密码下限提到 8 位（仅新注册，存量用户不受影响）
+  if (!password || password.length < 8) return { ok: false, error: "密码至少 8 位" };
   if (getUserByUsername(name)) return { ok: false, error: "用户名已存在" };
 
   const id = crypto.randomBytes(8).toString("hex");
-  createUser({ id, username: name, password_hash: hashPassword(password), role });
-  const user = getUserByUsername(name)!;
+  try {
+    createUser({ id, username: name, password_hash: hashPassword(password), role });
+  } catch (e) {
+    // 并发注册同名：UNIQUE 约束冲突 → 友好错误（不再静默吞掉/非空断言崩溃）
+    if (e instanceof Error && /UNIQUE/i.test(e.message)) {
+      return { ok: false, error: "用户名已存在" };
+    }
+    throw e;
+  }
+  const user = getUserByUsername(name);
+  if (!user) return { ok: false, error: "注册失败，请重试" };
   return { ok: true, user };
 }
 
@@ -80,6 +90,7 @@ export async function login(
   (await cookies()).set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
+    secure: true, // 全站 HTTPS（Caddy 反代），浏览器只看最终页面协议
     path: "/",
     maxAge: SESSION_TTL_MS / 1000,
   });

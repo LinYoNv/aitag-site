@@ -8,6 +8,7 @@ import { currentUser } from "@/lib/auth";
 import { getUserByApiToken } from "@/lib/db";
 import { parsePngMetadata } from "@/lib/png";
 import { extractArtistsFromPrompt } from "@/lib/png";
+import { rateLimit, clientIp } from "@/lib/ratelimit";
 import type { Work } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -160,6 +161,13 @@ export async function POST(req: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: "请先登录" }, { status: 401 });
     }
+    // 上传限流：每用户 60 次 / 小时 + 每 IP 120 次 / 小时（防刷盘）
+    if (
+      !rateLimit(`up:user:${user.id}`, 60, 60 * 60 * 1000) ||
+      !rateLimit(`up:ip:${clientIp(req)}`, 120, 60 * 60 * 1000)
+    ) {
+      return NextResponse.json({ error: "上传过于频繁，请稍后再试" }, { status: 429 });
+    }
     const form = await req.formData();
 
     const title = String(form.get("title") ?? "").slice(0, 200);
@@ -207,8 +215,12 @@ export async function POST(req: NextRequest) {
         fs.writeFileSync(filePath, bytes);
       }
 
-      // 前端提交的解析结果（可能是旧/错误逻辑，仅作编辑参考）
-      const frontMeta = parseMeta(String(form.get(`meta_${i}`) ?? ""));
+      // 前端提交的解析结果（可能是旧/错误逻辑，仅作编辑参考）；限制单份 JSON ≤1MB
+      const rawMetaStr = String(form.get(`meta_${i}`) ?? "");
+      if (rawMetaStr.length > 1_000_000) {
+        return NextResponse.json({ error: `失败：第 ${i + 1} 张参数 JSON 过大` }, { status: 400 });
+      }
+      const frontMeta = rawMetaStr ? parseMeta(rawMetaStr) : null;
       // 服务端权威解析（PNG 是唯一真相源）：解析成败都存档 _raw，并合并/纠正
       let meta: Record<string, unknown> | null = frontMeta;
       if (ext === ".png") {

@@ -30,7 +30,13 @@ export async function GET(
 
   const ext = path.extname(name).toLowerCase();
   const mime = MIME[ext] ?? "application/octet-stream";
-  const buf = fs.readFileSync(filePath);
+  // existsSync 与读取之间存在竞态（他人删除），包 try/catch 防未处理异常 → 500
+  let buf: Buffer;
+  try {
+    buf = fs.readFileSync(filePath);
+  } catch {
+    return new NextResponse("Not Found", { status: 404 });
+  }
   return new NextResponse(new Uint8Array(buf), {
     headers: {
       "Content-Type": mime,

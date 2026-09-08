@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import CopyButton from "@/components/CopyButton";
+import { artistsToText, COMFY_ORDER, NAI_ORDER, type ArtistTag } from "@/lib/param-view";
 
 interface Props {
   /** 单张图对应的参数对象（per_image 项或整个 metadata） */
@@ -9,50 +10,6 @@ interface Props {
   /** 卡片序号（多图时显示 图N） */
   index?: number;
 }
-
-// 画师条目（与 lib/types ArtistTag 一致）
-interface ArtistTag {
-  name: string;
-  weight: number;
-  raw?: string;
-}
-
-// 把画师列表渲染成一行可复制的文本（按出现顺序，保留权重语法）
-function artistsToText(artists: ArtistTag[]): string {
-  return artists.map((a) => a.raw ?? a.name).join(", ");
-}
-
-// NovelAI 参数的可读字段顺序
-const NAI_ORDER: Array<[string, string]> = [
-  ["model", "Model"],
-  ["sampler", "Sampler"],
-  ["steps", "Steps"],
-  ["width", "Width"],
-  ["height", "Height"],
-  ["scale", "Scale"],
-  ["seed", "Seed"],
-  ["noise_schedule", "Noise Schedule"],
-  ["sm", "SM"],
-  ["sm_dyn", "SM Dyn"],
-  ["dynamic_thresholding", "Dynamic Thresholding"],
-  ["cfg_rescale", "cfg"],
-  ["uncond_scale", "Uncond Scale"],
-  ["version", "Version"],
-  ["request_type", "Request Type"],
-];
-
-// ComfyUI 参数的可读字段顺序
-const COMFY_ORDER: Array<[string, string]> = [
-  ["model", "Model 底模"],
-  ["loras", "LoRA"],
-  ["sampler", "Sampler"],
-  ["scheduler", "Scheduler"],
-  ["steps", "Steps"],
-  ["cfg", "CFG"],
-  ["seed", "Seed"],
-  ["width", "Width"],
-  ["height", "Height"],
-];
 
 // 可折叠文本框：标题 + 右上角复制按钮 + 内容（与 Prompt/Negative 同款样式）
 function CopyableBox({
@@ -175,7 +132,7 @@ export default function CardMetaView({ data, index }: Props) {
           ) : (
             <div className="grid grid-cols-2 gap-1.5">
               {(fmt === "comfyui" ? COMFY_ORDER : NAI_ORDER).map(([k, label]) => {
-                if (k === "artists") return null;
+                if (k === "artists" || k === "prompt" || k === "uc") return null;
                 const v = data[k];
                 if (
                   v === undefined ||

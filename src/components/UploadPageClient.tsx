@@ -124,6 +124,10 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
   const aiType = tab === "nai" ? "nai" : tab === "comfyui" ? "comfyui" : "other";
 
   const switchMode = (m: UploadMode) => {
+    // 释放所有预览 ObjectURL，防内存泄漏
+    entries.forEach((e) => {
+      if (e.url.startsWith("blob:")) URL.revokeObjectURL(e.url);
+    });
     setTab(m);
     setEntries([]);
     setResult(null);
@@ -191,7 +195,11 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
   }
 
   function removeEntry(index: number) {
-    setEntries((prev) => prev.filter((_, i) => i !== index));
+    setEntries((prev) => {
+      const target = prev[index];
+      if (target && target.url.startsWith("blob:")) URL.revokeObjectURL(target.url);
+      return prev.filter((_, i) => i !== index);
+    });
   }
 
   function patchEntry(i: number, patch: Partial<FileEntry>) {

@@ -2,7 +2,7 @@
 
 自建「AI 绘画作品 + Prompt 咒语」检索图库站，面向群友分享 NovelAI / SD / ComfyUI 作品与完整生成参数。
 
-**线上地址**：https://juocho.kdns.fr （Cloudflare 灰云解析 → hk3 服务器 45.207.220.205，Caddy HTTPS 反代，Next standalone 内部端口 3101）
+**线上地址**：https://juocho.kdns.fr （Cloudflare 灰云 → Linux 服务器，Caddy HTTPS 反代，Next standalone 内部端口）
 
 ## 功能
 
@@ -48,23 +48,24 @@ npx tsc --noEmit   # 类型检查（改代码后必跑）
 npx eslint src     # lint（构建会因 eslint error 失败，本地必须先过）
 ```
 
-## 部署（hk3 生产机 45.207.220.205）
+## 部署（Linux 生产机）
 
 1. 本地：`npx tsc --noEmit && npx eslint src` 通过后提交推送 GitHub
-2. hk3：`cd /root/aitag-site && git pull origin main && npx next build`
+2. 服务器：`cd <源码目录> && git pull origin main && npx next build`
 3. 拷贝产物（⚠️ standalone 不含 static，必须单独拷；**node_modules 需整目录拷贝**，增量拷贝会破坏 sharp 等原生模块）：
    ```bash
-   rm -rf /root/aitag-deploy/.next
-   cp -r .next/standalone/.next /root/aitag-deploy/.next
-   cp .next/standalone/server.js /root/aitag-deploy/server.js
-   rm -rf /root/aitag-deploy/node_modules
-   cp -r .next/standalone/node_modules /root/aitag-deploy/node_modules
-   mkdir -p /root/aitag-deploy/.next/static
-   cp -r .next/static/. /root/aitag-deploy/.next/static/
+   rm -rf <部署目录>/.next
+   cp -r .next/standalone/.next <部署目录>/.next
+   cp .next/standalone/server.js <部署目录>/server.js
+   rm -rf <部署目录>/node_modules
+   cp -r .next/standalone/node_modules <部署目录>/node_modules
+   mkdir -p <部署目录>/.next/static
+   cp -r .next/static/. <部署目录>/.next/static/
    systemctl restart aitag-site
    ```
-   ⚠️ **不要覆盖** `/root/aitag-deploy/data/`（数据库）与图片存储。
-4. 验证：`systemctl is-active aitag-site && curl -s -o /dev/null -w "%{http_code}" https://juocho.kdns.fr/api/works?page=1`
+   ⚠️ **不要覆盖** `<部署目录>/data/`（数据库）与图片存储。
+4. 验证：`systemctl is-active aitag-site && curl -s -o /dev/null -w "%{http_code}" https://juocho.kdns.fr/login`
+   （登录页 200 即正常；接口均需登录，健康检查不要打 `/api/*`）
 
 ## API Token（外部插件上传）
 
@@ -87,14 +88,13 @@ curl -X POST https://juocho.kdns.fr/api/upload \
 解析器升级后对存量作品重算（自动备份）：
 
 ```bash
-AITAG_DB=/root/aitag-deploy/data/aitag.db node recalc-metadata.mjs
+AITAG_DB=<部署目录>/data/aitag.db node recalc-metadata.mjs
 # --dry-run 预览
 ```
 
 ## 文档
 
-- `docs/DOCUMENTATION.md` — 权威项目文档（功能/API/数据模型/文件用途，与源码同步）
-- `DEPLOY.md` — 部署说明（较旧，部署以本 README 为准）
+- `docs/DOCUMENTATION.md` — 权威项目文档（功能/API/数据模型/文件用途，与源码同步，已脱敏）
 - `REF_IMAGE_STUDIO.md` — 参考项目（AstrBot Image Studio 插件）改进清单（A/B/C 分级，本地未提交）
 
 ## 数据迁移注意

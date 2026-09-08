@@ -4,6 +4,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { currentUser } from "@/lib/auth";
 import { updateAvatar } from "@/lib/db";
+import { rateLimit } from "@/lib/ratelimit";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -30,6 +31,10 @@ export async function POST(req: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: "请先登录" }, { status: 401 });
     }
+    // 限流：每用户每年换头像次数有限，10 次 / 小时足够
+    if (!rateLimit(`av:user:${user.id}`, 10, 60 * 60 * 1000)) {
+      return NextResponse.json({ error: "操作过于频繁，请稍后再试" }, { status: 429 });
+    }
 
     const form = await req.formData();
     const file = form.get("avatar");
@@ -55,6 +60,19 @@ export async function POST(req: NextRequest) {
 
     const url = `/api/avatars/${filename}`;
     updateAvatar(user.id, url);
+
+    // 尽力清理旧头像文件（避免 data/avatars/ 无限累积；清理失败不影响结果）
+    const oldUrl = user.avatar ?? "";
+    if (oldUrl.startsWith("/api/avatars/") && oldUrl !== url) {
+      const oldPath = path.join(AVATAR_DIR, path.basename(oldUrl));
+      if (fs.existsSync(oldPath)) {
+        try {
+          fs.unlinkSync(oldPath);
+        } catch (e) {
+          console.error("清理旧头像失败:", e);
+        }
+      }
+    }
 
     return NextResponse.json({ ok: true, avatar: url });
   } catch (e) {
