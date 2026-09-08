@@ -95,6 +95,7 @@ AITAG_DB=<部署目录>/data/aitag.db node recalc-metadata.mjs
 ## 文档
 
 - `docs/DOCUMENTATION.md` — 权威项目文档（功能/API/数据模型/文件用途，与源码同步，已脱敏）
+- `docs/API.md` — HTTP API 文档（外部插件/脚本调用方参考；含上传、作品、认证、限流、变更日志）
 - `REF_IMAGE_STUDIO.md` — 参考项目（AstrBot Image Studio 插件）改进清单（A/B/C 分级，本地未提交）
 
 ## 数据迁移注意
