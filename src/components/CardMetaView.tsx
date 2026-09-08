@@ -9,6 +9,8 @@ interface Props {
   data: Record<string, unknown> | null;
   /** 卡片序号（多图时显示 图N） */
   index?: number;
+  /** 当前图片原始 URL（下载按钮用） */
+  imageSrc?: string;
 }
 
 // 可折叠文本框：标题 + 右上角复制按钮 + 内容（与 Prompt/Negative 同款样式）
@@ -46,8 +48,9 @@ function CopyableBox({
   );
 }
 
-export default function CardMetaView({ data, index }: Props) {
+export default function CardMetaView({ data, index, imageSrc }: Props) {
   const [view, setView] = useState<"formatted" | "json">("formatted");
+  const [downloading, setDownloading] = useState(false);
 
   if (!data) return null;
 
@@ -63,6 +66,32 @@ export default function CardMetaView({ data, index }: Props) {
   const artists = (data.artists as ArtistTag[] | undefined) ?? [];
   const artistsText = artistsToText(artists);
 
+  // 下载当前图片：fetch → blob → 触发下载（跨域图片需 blob 才能改文件名）
+  async function handleDownload() {
+    if (!imageSrc || downloading) return;
+    setDownloading(true);
+    try {
+      const res = await fetch(imageSrc, { mode: "cors" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const ext = blob.type.includes("png") ? "png" : blob.type.includes("webp") ? "webp" : blob.type.includes("jpeg") ? "jpg" : "img";
+      const name = `aitag-${typeof index === "number" ? `image-${index + 1}` : "image"}.${ext}`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      // 降级：直接打开原图让浏览器保存
+      if (imageSrc) window.open(imageSrc, "_blank");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
     <div className="p-3 border-t border-[#262b36]">
       {/* 头部：图序号 + 指令/JSON 切换 */}
@@ -73,6 +102,36 @@ export default function CardMetaView({ data, index }: Props) {
           </span>
         )}
         <div className="flex gap-1 ml-auto">
+          {imageSrc && (
+            <button
+              type="button"
+              onClick={handleDownload}
+              disabled={downloading}
+              title="下载当前图片"
+              className={`px-2 py-0.5 rounded text-[11px] border inline-flex items-center gap-1 ${
+                downloading
+                  ? "bg-[#151922] border-[#262b36] text-[#5a6270]"
+                  : "bg-[#151922] border-[#262b36] text-[#aeb6c2] hover:border-[#7aff9a] hover:text-[#7aff9a]"
+              }`}
+            >
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              {downloading ? "下载中…" : "下载"}
+            </button>
+          )}
           <button
             onClick={() => setView("formatted")}
             className={`px-2 py-0.5 rounded text-[11px] border ${

@@ -183,6 +183,7 @@ export default function Lightbox({ images, metas, index, title, onClose, onNavig
             <CardMetaView
               data={metas && metas[current] ? metas[current] : null}
               index={multi ? current : undefined}
+              imageSrc={images[current] ?? undefined}
             />
           </aside>
         </div>

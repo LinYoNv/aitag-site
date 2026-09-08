@@ -272,6 +272,7 @@ export default function WorkDetailClient({ work, canDelete, isAdmin }: Props) {
                 <CardMetaView
                   data={metaForImage(i)}
                   index={multi ? i : undefined}
+                  imageSrc={img}
                 />
               </div>
             ))}
