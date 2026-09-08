@@ -42,7 +42,23 @@ export default function RegisterForm() {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: "#0b0d10" }}>
         <div className="w-full max-w-sm mx-4 bg-[#151922] border border-[#262b36] rounded-2xl p-6 sm:p-8 text-center">
-          <div className="text-4xl mb-3">✅</div>
+          <div className="mb-3">
+            <svg
+              width="44"
+              height="44"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#4c9fff"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="mx-auto"
+              aria-hidden
+            >
+              <circle cx="12" cy="12" r="10" />
+              <path d="m8 12 3 3 5-6" />
+            </svg>
+          </div>
           <h1 className="text-lg font-bold text-[#e6edf3] mb-2">注册成功</h1>
           <p className="text-sm text-[#aeb6c2] mb-6">
             现在去登录吧！

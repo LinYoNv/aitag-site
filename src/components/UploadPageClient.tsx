@@ -316,7 +316,7 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
         const target = data.id ?? data.ids?.[0];
         setResult({
           ok: true,
-          msg: `上传成功！共 ${data.count ?? 1} 件` + (shareTitle && entries.length > 1 ? "（已合并）" : ""),
+          msg: `上传成功，共 ${data.count ?? 1} 件` + (shareTitle && entries.length > 1 ? "（已合并）" : ""),
         });
         if (target) {
           window.location.href = `/i/${target}`;
