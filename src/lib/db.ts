@@ -8,6 +8,7 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import type { Work, WorkListItem, PagedWorks } from "./types";
 import { toThumbUrl } from "./format";
+import type { R18GPref } from "./r18g-tags";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "aitag.db");
@@ -18,6 +19,29 @@ export function getDb(): DatabaseSync {
   if (!db) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     db = new DatabaseSync(DB_PATH);
+
+    // 注册「正向提示词含词」匹配函数（R18G 屏蔽用）：
+    // 只匹配结构化正向 prompt（metadata.prompt / metadata.per_image[*].prompt），
+    // 不匹配负向 uc（负向出现 = 作者已排除），不匹配 rawJson/_raw.workflow（节点 JSON 噪音）。
+    // 词边界（\b）+ 大小写不敏感：scat 不会误中 subsurface_scattering、pee 不会误中 peep。
+    db.function("has_pos_tag", { deterministic: true }, (meta: unknown, tag: unknown) => {
+      if (typeof meta !== "string" || !meta || typeof tag !== "string" || !tag) return 0;
+      try {
+        const m = JSON.parse(meta) as Record<string, unknown>;
+        const prompts: string[] = [];
+        if (typeof m.prompt === "string") prompts.push(m.prompt);
+        if (Array.isArray(m.per_image)) {
+          for (const p of m.per_image) {
+            if (p && typeof p.prompt === "string") prompts.push(p.prompt);
+          }
+        }
+        const haystack = prompts.join(" \u0001 ").toLowerCase();
+        const needle = tag.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return new RegExp(`(^|[^a-z0-9_])${needle}($|[^a-z0-9_])`).test(haystack) ? 1 : 0;
+      } catch {
+        return 0;
+      }
+    });
     db.exec(`
       PRAGMA journal_mode = WAL;
       CREATE TABLE IF NOT EXISTS works (
@@ -90,6 +114,10 @@ export function getDb(): DatabaseSync {
     // 兼容已存在的 users 表（旧库没有 api_token_hash 列）
     if (!cols.some((c) => c.name === "api_token_hash")) {
       db.exec(`ALTER TABLE users ADD COLUMN api_token_hash TEXT NOT NULL DEFAULT ''`);
+    }
+    // 兼容已存在的 users 表（旧库没有 r18g_pref 列：R18G 屏蔽偏好 JSON）
+    if (!cols.some((c) => c.name === "r18g_pref")) {
+      db.exec(`ALTER TABLE users ADD COLUMN r18g_pref TEXT NOT NULL DEFAULT '{}'`);
     }
   }
   return db;
@@ -277,8 +305,10 @@ export function listWorks(opts: {
   ai_type?: string;
   time_range?: string;
   author?: string;
-  /** 屏蔽 tag：正向 prompt 含任一该词的图排除（逗号分隔多个） */
+  /** 屏蔽 tag：正向 prompt 含任一该词的图排除（逗号分隔多个，兼容旧用法） */
   block_tags?: string;
+  /** 屏蔽 tag（数组形式）：各词都按「正向 prompt 词边界命中」独立排除，全部满足才保留 */
+  blocked_pos_tags?: string[];
   page?: number;
   page_size?: number;
 }): PagedWorks {
@@ -305,20 +335,25 @@ export function listWorks(opts: {
     where.push("(metadata LIKE ?)");
     params.push(`%${opts.prompt}%`);
   }
-  // 屏蔽 tag：正向 prompt（metadata 里 "prompt": 字段）含屏蔽词的排除。
-  // 匹配整个 metadata 中任意 prompt 字段（顶层 + per_image + _raw 存档），
-  // 只要有任一正向 prompt 含该词即屏蔽整作品。LIKE 对 ASCII 大小写不敏感。
+  // 屏蔽 tag：只匹配正向 prompt（词边界）——用 has_pos_tag 函数，每个词独立排除。
+  // 语义：作品的正向 prompt（顶层 + per_image 逐图）只要含任一屏蔽词即被整部排除。
+  // 负向 uc 从不匹配（负向出现 = 作者已排除，图中不含）。
+  const blockedTags: string[] = [];
   if (opts.block_tags) {
-    const tags = opts.block_tags
-      .split(",")
-      .map((t) => t.trim().toLowerCase())
-      .filter(Boolean);
-    for (const tag of tags) {
-      // 转义 LIKE 通配符，ESCAPE '\'
-      const escaped = tag.replace(/[\\%_]/g, (c) => "\\" + c);
-      where.push(`metadata NOT LIKE ? ESCAPE '\\'`);
-      params.push(`%"prompt":%${escaped}%`);
+    for (const t of opts.block_tags.split(",")) {
+      const v = t.trim().toLowerCase();
+      if (v) blockedTags.push(v);
     }
+  }
+  if (opts.blocked_pos_tags) {
+    for (const t of opts.blocked_pos_tags) {
+      const v = t.trim().toLowerCase();
+      if (v) blockedTags.push(v);
+    }
+  }
+  for (const tag of blockedTags) {
+    where.push(`has_pos_tag(metadata, ?) = 0`);
+    params.push(tag);
   }
   // 类型筛选：只接受明确的 ai_type 值
   if (opts.ai_type && ["sd", "nai", "nai_x", "comfyui", "other"].includes(opts.ai_type)) {
@@ -397,29 +432,34 @@ export function listBookmarkedWorks(
   userId: string,
   page = 1,
   page_size = 24,
+  blockedPosTags: string[] = [],
 ): PagedWorks {
   const d = getDb();
   const page2 = Math.max(1, page);
   const size = Math.min(50, Math.max(1, page_size));
+  const blocked = blockedPosTags.filter((t) => t.trim());
+  const extraWhere = blocked.map(() => `has_pos_tag(works.metadata, ?) = 0`).join(" AND ");
   const total =
     (
       d
         .prepare(
           `SELECT COUNT(*) AS c FROM user_actions
            JOIN works ON works.id = user_actions.work_id
-           WHERE user_actions.user_id = ? AND user_actions.action = 'bookmark'`,
+           WHERE user_actions.user_id = ? AND user_actions.action = 'bookmark'
+           ${extraWhere ? "AND " + extraWhere : ""}`,
         )
-        .get(userId) as { c: number }
+        .get(userId, ...blocked) as { c: number }
     ).c ?? 0;
   const rows = d
     .prepare(
       `SELECT works.* FROM user_actions
        JOIN works ON works.id = user_actions.work_id
        WHERE user_actions.user_id = ? AND user_actions.action = 'bookmark'
+       ${extraWhere ? "AND " + extraWhere : ""}
        ORDER BY user_actions.create_date DESC
        LIMIT ? OFFSET ?`,
     )
-    .all(userId, size, (page2 - 1) * size) as Record<string, unknown>[];
+    .all(userId, ...blocked, size, (page2 - 1) * size) as Record<string, unknown>[];
   const items: WorkListItem[] = rows.map((r) => toListItem(rowToWork(r)));
   return {
     items,
@@ -472,6 +512,49 @@ export function createUser(user: {
 export function updateAvatar(userId: string, avatarUrl: string): void {
   const d = getDb();
   d.prepare(`UPDATE users SET avatar = ? WHERE id = ?`).run(avatarUrl, userId);
+}
+
+export function updatePassword(userId: string, passwordHash: string): void {
+  const d = getDb();
+  d.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).run(passwordHash, userId);
+}
+
+// ---- 用户偏好：R18G 内容屏蔽（总开关 + 勾选词 + 自定义词） ----
+
+function defaultPref(): R18GPref {
+  return { enabled: false, selected: [], custom: [] };
+}
+
+/** 解析偏好 JSON（容错：损坏/缺字段都回退默认） */
+export function getUserPref(userId: string): R18GPref {
+  const d = getDb();
+  const row = d.prepare("SELECT r18g_pref FROM users WHERE id = ?").get(userId) as
+    | { r18g_pref?: string }
+    | undefined;
+  const raw = row?.r18g_pref;
+  if (!raw) return defaultPref();
+  try {
+    const p = JSON.parse(raw) as Partial<R18GPref>;
+    return {
+      enabled: p.enabled === true,
+      selected: Array.isArray(p.selected)
+        ? p.selected.filter((s): s is string => typeof s === "string")
+        : [],
+      custom: Array.isArray(p.custom)
+        ? p.custom.filter((s): s is string => typeof s === "string")
+        : [],
+    };
+  } catch {
+    return defaultPref();
+  }
+}
+
+export function setUserPref(userId: string, pref: R18GPref): void {
+  const d = getDb();
+  d.prepare(`UPDATE users SET r18g_pref = ? WHERE id = ?`).run(
+    JSON.stringify(pref),
+    userId,
+  );
 }
 
 // ---- API Token（供外部插件上传鉴权，账号绑定） ----
