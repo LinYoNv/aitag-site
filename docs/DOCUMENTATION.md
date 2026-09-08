@@ -2,7 +2,7 @@
 
 > 本文档描述项目**当前实际状态**（与源码一致），是功能/文件/API 的权威参考。
 > 配套文档：`HANDOFF.md`（部署交接）、`ENVIRONMENT-NOTES.md`（环境备忘）、`login-register-progress.md`（登录注册线进度）。
-> 最后更新：2026-09-05
+> 最后更新：2026-09-08
 
 ---
 
@@ -23,14 +23,13 @@
 
 | 项 | 值 |
 |---|---|
-| 生产部署（2号机 hk-2） | `/root/aitag-deploy/`（standalone，systemd 服务 `aitag-site.service` 监听 **127.0.0.1:3101** 内部端口） |
-| 源码（容器 1号机） | `/root/dsh-work/site/`（git 仓库，remote=GitHub `LinYoNv/aitag-site`） |
-| **HTTPS 域名**（Caddy 反代） | **`https://juocho.kdns.fr`** 和 **`https://juocho.kdns.fr:3100`**（Let's Encrypt 证书，2026-09-03 配置） |
-| 旧 IP 直连 | ~~`http://154.12.28.103:3100`~~ → 3100 已被 Caddy 占用走 HTTPS；明文 `http://` 访问 3100 会 400 |
-| 线上数据库 | `/root/aitag-deploy/data/aitag.db`（2号机） |
-| Node 版本 | 2号机 v24.20.0；容器 v24.19.0（均内置 `node:sqlite`） |
+| 生产部署（hk3 服务器 45.207.220.205） | `/root/aitag-deploy/`（standalone，systemd 服务 `aitag-site.service` 监听 **127.0.0.1:3101** 内部端口） |
+| 源码（本机） | `/root/Ai-works/aitag-site/`（git 仓库，remote=GitHub `LinYoNv/aitag-site`） |
+| **HTTPS 域名**（Caddy 反代 + Cloudflare 灰云） | **`https://juocho.kdns.fr`**（DNS A=45.207.220.205） |
+| 线上数据库 | `/root/aitag-deploy/data/aitag.db`（hk3） |
+| Node 版本 | hk3 v24.20.0；本机 v24.19.0（均内置 `node:sqlite`） |
 
-**HTTPS 反向代理（2号机，2026-09-03）**：
+**HTTPS 反向代理（hk3，2026-09-03）**：
 - 装了 **Caddy 2.6.2**（`/usr/bin/caddy`，systemd `caddy.service`）
 - Caddyfile：`/etc/caddy/Caddyfile`（备份 `/etc/caddy/Caddyfile.bak`）
   ```caddy
@@ -50,7 +49,7 @@
 - Let's Encrypt 自动签发/续期 `CN=juocho.kdns.fr`，443 和 3100 同证
 - `http://juocho.kdns.fr`(80) → 308 跳 HTTPS；3100 明文 HTTP → 400（只走 TLS）
 
-**2号机服务管理**：
+**hk3 服务管理**：
 ```bash
 systemctl status aitag-site     # Next 站本身（内部端口 3101）
 systemctl status caddy          # HTTPS 反代（3100 + 443）
@@ -62,8 +61,8 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 **部署流程（改代码后上线）**：
 1. 容器内改代码 → `npx next build`
 2. `git add -A && git commit && git push origin main`
-3. 2号机：`cd /root/aitag-site && git pull origin main && npx next build`
-4. 2号机部署：`rm -rf /root/aitag-deploy/.next && cp -r .next/standalone/.next /root/aitag-deploy/.next && cp .next/standalone/server.js /root/aitag-deploy/server.js && mkdir -p /root/aitag-deploy/.next/static && cp -r .next/static/. /root/aitag-deploy/.next/static/`
+3. hk3：`cd /root/aitag-site && git pull origin main && npx next build`
+4. hk3 部署：`rm -rf /root/aitag-deploy/.next && cp -r .next/standalone/.next /root/aitag-deploy/.next && cp .next/standalone/server.js /root/aitag-deploy/server.js && mkdir -p /root/aitag-deploy/.next/static && cp -r .next/static/. /root/aitag-deploy/.next/static/`
 5. `systemctl restart aitag-site`（Caddy 无需动，仍反代 3101）
 ⚠️ **必须拷 `.next/static`**（standalone 产物不含它）；⚠️ **不要覆盖** `/root/aitag-deploy/data/` 与 `public/images/`（用户数据）。
 💡 访问入口：`https://juocho.kdns.fr` 或 `https://juocho.kdns.fr:3100`。
@@ -77,16 +76,19 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 | 登录 | 用户名+密码，session cookie（30 天，httpOnly+lax） | `/login` |
 | 注册 | 开放注册，普通 user；用户名 2-30 字符（字母数字下划线中文），密码≥4 | `/register` |
 | 整站门控 | 未登录访问任何页面 → 307 跳 `/login` | 全局 |
-| 画廊 | 栅格展示 + 搜索（ID/作者/标签/参数）+ 排序（最新/月榜）+ 分页 + 悬浮预览 | `/` |
+| 画廊 | 栅格展示 + 搜索（ID/作者/标签/参数/正向prompt）+ **屏蔽 tag（黑名单）** + 排序（最新/最旧/月榜）+ 分页 + 悬浮预览 + **缩略图**（480px WebP 懒加载） | `/` |
 | 作品详情 | 多图 Grid 卡片，每图参数一体，JSON 视图 | `/i/[id]` |
 | 互动 | 点赞(👍)/收藏(⭐)/浏览量(👁)；浏览量 10 分钟窗口去重（同用户同作品不重复计数） | 详情页 |
-| 上传 | 3 种方式（NAI/ComfyUI/无参数），上传时可编辑完整参数 | `/upload` |
+| 上传 | 3 种方式（NAI/ComfyUI/无参数），上传时可编辑完整参数；**PNG 唯一真相源**（后端权威解析）+ **内容去重**（SHA-256，相同图只存一份文件） | `/upload` |
 | 删除作品 | 管理员删全部；作者删自己的；顺带删图片文件 | 详情页按钮 |
 | 头像下拉菜单 | 头部最右圆形头像（可上传/默认图标），点击弹出【我的主页】【个人资料设置】【登出】；**黄色「管理员」徽标仅 admin 可见** | 头部 |
 | 个人资料 | 更换头像（PNG/JPG/WebP ≤2MB）+ 用户名/角色/昵称/注册时间 + **API Token 管理** | `/profile` |
 | 用户主页 | 参照 Pixiv：头像/用户名/管理员徽章/注册时间资料卡 + 统计行（作品/点赞/收藏/浏览）+ **作品\|收藏 Tab 滑块** | `/u/[username]` |
 | API Token | 账号绑定凭证，供外部插件走接口上传鉴权；明文只显示一次，库里存 SHA-256 哈希；可重新生成（旧的立即失效） | `/profile` |
 | 站点配置 | `/api/config` 返回站点名、语言、上传开关 | API |
+| 画师解析 | NovelAI 新旧格式、数值权重、花括号强调、**NAI v4/v5 加权画师串**、风格词黑名单过滤；uc 纯画师列表自动按「排除画师」呈现 | 详情页 |
+| 解析健壮性 (A1) | 文本 chunk 上限 4MB / ComfyUI 节点上限 2048 / 递归深度上限 100——畸形 PNG 不崩接口 | `src/lib/png.ts` |
+| ComfyUI 反向追溯 (A2) | 从保存节点反向 DFS 活跃子图采参，孤立分支不污染；无输出根退化全图扫描 | `src/lib/png.ts` |
 
 **上传 3 种方式（2026-09-03 精简）**：
 1. **NAI 版本**：读 NovelAI PNG 内嵌参数（tEXt Comment），可修改。
@@ -122,11 +124,12 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 
 | 方法 | 路径 | 权限 | 参数 | 返回 |
 |---|---|---|---|---|
-| GET | `/api/works` | 公开 | `q`（标题/简介/作者/ID/标签模糊）、`prompt`（metadata 模糊）、`sort`（new\|monthly\|bookmarks）、`page`、`page_size`(≤50) | `{items,page,page_size,total,total_pages}`；item 含 `cover=images[0]` |
+| GET | `/api/works` | 公开 | `q`（标题/简介/作者/ID/标签/**正向prompt**模糊）、`prompt`（metadata 模糊）、`block_tags`（黑名单，正向 prompt 含词排除，逗号分隔）、`sort`（new\|old\|monthly\|bookmarks）、`page`、`page_size`(≤50) | `{items,page,page_size,total,total_pages}`；item 含 `cover=images[0]` 缩略图 |
 | GET | `/api/works/[id]` | 登录 | — | 200 Work（含 `user_liked`/`user_bookmarked` 当前用户状态）；401 未登录；404 不存在 |
 | POST | `/api/works/[id]/view` | 登录 | — | 200 `{ok,views}`（10 分钟窗口去重，窗口内不 +1） |
 | POST | `/api/works/[id]/action` | 登录 | JSON `{action:"like"\|"bookmark"}` | 200 `{ok,active,count}`（幂等 toggle） |
 | DELETE | `/api/works/[id]` | 登录+权限 | — | 200 `{ok}`；401/403/404/500；删除时清对应图片文件 |
+| POST | `/api/upload` | 登录或 API Token | multipart `files`（可多个 PNG/JPG/WebP ≤20MB/张）+ `title`/`caption`/`meta_i`（前端解析结果 JSON） | 201 `{ok:true, ids:[], count}`；**内容去重**：同 SHA-256 的图只落盘一份文件，URL 复用 |
 | GET | `/api/config` | 公开 | — | `{site_name,image_prefix,languages,default_language,upload_enabled}` |
 
 **Work 字段**：`id, title, caption, create_date, ai_type(sd|nai|nai_x|comfyui|other), image_count, tags[], author_name, total_view, total_bookmarks, total_likes, images[], metadata`（详情响应另含 `user_liked`/`user_bookmarked`）。
@@ -147,6 +150,7 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/images/[name]` | 上传作品图：先查 `data/uploads/`，回退 `public/images/uploads/`（legacy）；防目录穿越；MIME 按扩展名；Cache 1 天 |
+| GET | `/api/images/thumb/[name]` | 缩略图：首次访问用 sharp 生成 480px WebP 缓存到 `data/uploads/thumb/`，之后直读缓存（画廊列表用） |
 | GET | `/api/avatars/[name]` | 头像图：`data/avatars/`；防目录穿越；Cache 1 天 |
 
 ### 4.4 页面路由
@@ -230,7 +234,7 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 
 ---
 
-## 6. 文件用途（源码 `/root/dsh-work/site`）
+## 6. 文件用途（源码 `/root/Ai-works/aitag-site`）
 
 ### 入口与页面（`src/app/`）
 | 文件 | 用途 |
@@ -255,8 +259,9 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 | `works/[id]/route.ts` | 详情 GET / 删除 DELETE（权限） |
 | `works/[id]/view/route.ts` | 记录浏览（10 分钟去重） |
 | `works/[id]/action/route.ts` | 点赞/收藏 toggle（幂等） |
-| `upload/route.ts` | 上传作品（多图、合并/独立、作者=账号；**session 或 Bearer token 鉴权**） |
-| `images/[name]/route.ts` | 服务上传图（data/uploads + legacy public/images/uploads 回退） |
+| `upload/route.ts` | 上传作品（多图、合并/独立、作者=账号；**session 或 Bearer token 鉴权**）；PNG 解析结果与前端 meta 服务端权威合并 + **内容去重**（SHA-256 hash 文件名，同 hash 只落盘一次并复用 URL） |
+| `images/[name]/route.ts` | 服务上传图（data/uploads + legacy public/images/uploads 回退）；防目录穿越；MIME 按扩展名；Cache 1 天 |
+| `images/thumb/[name]/route.ts` | 缩略图：sharp 生成 480px WebP 缓存到 `data/uploads/thumb/`，之后直读缓存 |
 | `config/route.ts` | 站点配置 |
 
 ### 库（`src/lib/`）
@@ -267,7 +272,7 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 | `guard.ts` | `requireLogin()` 页面级登录保护 |
 | `types.ts` | 共享类型：Work/WorkListItem/PagedWorks/PerImageMeta/PngParseResult + `getPerImageMetas()` |
 | `format.ts` | ai_type 标签、日期格式化 |
-| `png.ts` | PNG tEXt chunk 解析：NovelAI Comment JSON + **画师(artist)提取**（artist: 前缀/花括号/权重 + **NAI v4/v5 加权画师串**，`isArtistList` 判定纯画师列表）+ **ComfyUI workflow 解析**（resolveNodeText 递归、JoinStringMulti/CR Prompt Text/ShowText 等自定义节点、unet_name 底模） |
+| `png.ts` | PNG tEXt chunk 解析：NovelAI Comment JSON + **画师(artist)提取**（artist: 前缀/花括号/权重 + **NAI v4/v5 加权画师串**，`isArtistList` 判定纯画师列表）+ **ComfyUI workflow 解析**（resolveNodeText 递归、JoinStringMulti/CR Prompt Text/ShowText 等自定义节点、unet_name 底模）+ **A1 解析护栏**（MAX_TEXT_VALUE_BYTES=4MB / MAX_COMFY_NODES=2048 / MAX_COMFY_DEPTH=100 / MAX_JSON_DEPTH，畸形 PNG 拒绝/截断不崩）+ **A2 ComfyUI 反向追溯**（selectOutputs 从 SaveImage/PreviewImage 输出根 → collectOrder 反向 DFS 活跃子图（查环/剪枝/后序）→ 只采参与生成的节点参数；孤立分支不污染；无输出根时退化全图扫描）+ **NAI 模型 Source 兜底**（确切模型 ID 优先 comment.model_name+hash → comment.source → 顶层 tEXt `Source` 字段 → `NovelAI` 占位） |
 
 ### 组件（`src/components/`）
 | 文件 | 用途 |
@@ -286,7 +291,7 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 ### 脚本（`scripts/`）
 | 文件 | 用途 |
 |---|---|
-| `create-admin.mjs` | 创建 admin（幂等）：`node scripts/create-admin.mjs <用户名> <密码>`；支持 `DATABASE_PATH` 指向其他库（如 2号机生产库） |
+| `create-admin.mjs` | 创建 admin（幂等）：`node scripts/create-admin.mjs <用户名> <密码>`；支持 `DATABASE_PATH` 指向其他库（如 hk3 生产库） |
 | `seed.mjs` | 种子数据导入：从 AstrBot 图片目录挑 N 张 NovelAI PNG，解析元数据 → 拷到 `public/images/works/` → 写 SQLite |
 
 ---
@@ -296,7 +301,7 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 1. **密码安全**：scrypt（`salt:hash`），`crypto.timingSafeEqual` 恒定时间比较；`safeUser` 永不外泄哈希。
 2. **会话**：cookie `aitag_session`，httpOnly + sameSite lax + path `/`，30 天 TTL；登出删 session 行。
 3. **整站门控**：每个页面 `requireLogin()`；未登录 307 → `/login`（`redirect`）。
-4. **上传图片路径**：新上传存 `data/uploads/`（运行时数据，避免 Next 静态缓存）；`/api/images/[name]` 服务之，并回退旧路径 `public/images/uploads/`。种子图在 `public/images/works/`（静态）。
+4. **上传图片路径**：新上传存 `data/uploads/`（运行时数据，避免 Next 静态缓存）；`/api/images/[name]` 服务之，并回退旧路径 `public/images/uploads/`。种子图在 `public/images/works/`（静态）。**A3 内容去重**：文件名 = 图片内容 SHA-256 + 原扩展名（如 `<64位hash>.png`），同 hash 已存在则跳过写盘复用 URL——相同图片全站只存一份文件；旧图（`u_*.png` 随机名）不受影响。
 5. **删除作品**：按 `author_name === username` 判定作者；admin 全权；删除时尽力删除对应图片文件。
 6. **头像**：`data/avatars/`；上传后 `users.avatar` 存 `/api/avatars/<file>`；前端无头像时渲染内置 SVG 人形（`DefaultAvatar`，深色底+人形剪影，无需外网）。
 7. **兼容旧库**：`getDb()` 建表后用 `PRAGMA table_info(users)` 检查，缺列则 `ALTER TABLE ADD COLUMN`（老库平滑升级：avatar → api_token_hash）。**惰性迁移：部署后需触发一次真实 API 请求**（如 `GET /api/works?page=1`）否则新表/新列不生效。
@@ -308,15 +313,19 @@ systemd unit：`/etc/systemd/system/aitag-site.service`，`WorkingDirectory=/roo
 13. **uc 纯画师列表 → 排除画师**：NAI 部分生成把「排除画师」写进 Negative Prompt（uc），详情页用 `isArtistList()` 识别后按 **「排除画师 Excluded Artists」** 呈现（数据不丢，只是正确归类），不再显示为 Negative Prompt。
 14. **存量作品画师补算**：`GET /api/works/[id]` 读取时若 NAI 作品 `artists` 为空，用增强逻辑从 `metadata.prompt`（兜底 `_raw.comment.prompt`）即时补算——旧作品无需跑迁移脚本即可显示画师。
 15. **已知废弃**：中英切换、独立月榜页 = 废案（用户拍板不做）。
+16. **A1 解析护栏（2026-09-06）**：`src/lib/png.ts` 顶部导出 `MAX_TEXT_VALUE_BYTES=4*1024*1024`、`MAX_COMFY_NODES=2048`、`MAX_COMFY_DEPTH=100`、`MAX_JSON_DEPTH=100`。tEXt 值超 4MB 拒绝、workflow 节点数超限返回 null、递归深度超限截断——恶意/畸形 PNG 不再打崩接口或爆内存。
+17. **A2 ComfyUI 反向追溯（2026-09-06）**：`normalizeComfyWorkflow` 之后新增 `comfyRef`/`collectOrder`（active 集查环 + visited 剪枝 + 后序）/`selectOutputs`（SAVE_TYPES：SaveImage/SaveAnimatedWEBP/SaveAnimatedPNG/SaveImageWebsocket + PreviewImage；saves 排除 PreviewImage；优先级：显式 outputNodeId > 唯一保存节点 > 唯一预览节点 > null）。`parseComfyUi` 只采输出根反向可达的活跃子图节点参数；无输出根退化全图扫描（兼容老数据不回归）。实测多分支/孤立 CLIPTextEncode-KSampler 分支的 ComfyUI 图，参数与生产库存储值一致。
+18. **NAI 模型 Source 兜底（2026-09-07，commit d0f00ab）**：确切模型 ID（如 `NovelAI Diffusion V4.5 4BDE2A90`）不在 Comment JSON 里，而在 PNG 顶层 tEXt `Source` 字段。`normalizeNovelAi` 优先级：`model_name+model_hash` > `comment.source` > **texts.Source**（trim、跳过 `NovelAI` 占位）> `NovelAI`。修复前 V4.5/V5 作品模型只显示 "NovelAI"。
+19. **A3 上传内容去重（2026-09-08，commit a0b832e 保留部分）**：`upload/route.ts` 用 `crypto.createHash("sha256")` 算图片内容哈希，文件名=`<sha256><ext>`；`fs.existsSync` 命中则复用 URL 跳过写盘。**B2 复现/导出已按用户决定移除**（2026-09-08，commit a1fa07a），收藏/用户主页保留。
 
 ---
 
 ## 8. 账号与环境
 
-- **admin**：用户名 `admin`，密码存容器 `/root/dsh-work/.admin-cred.tmp`（chmod 600，内容 `ADMIN_PASS=<pass>`）；2号机生产库已有该账号（role=admin）。
-- **2号机 DB**：`/root/aitag-deploy/data/aitag.db`（23 条作品，admin 名下 13 条；含 users/sessions/user_actions/view_logs 表）。
-- **GitHub**：`https://github.com/LinYoNv/aitag-site`，分支 `main`；凭据走 `credential.helper=store --file=/tmp/.git-cred-ok`（容器内）。
-- **API 测试小抄**（2号机本机）：注册→登录→me→上传→登出，见 `login-register-progress.md` §自测。
+- **admin**：用户名 `admin`，密码存容器 `/root/dsh-work/.admin-cred.tmp`（chmod 600，内容 `ADMIN_PASS=<pass>`）；hk3 生产库已有该账号（role=admin）。
+- **hk3 生产机（45.207.220.205）DB**：`/root/aitag-deploy/data/aitag.db`（40 条作品，21 个用户；含 users/sessions/user_actions/view_logs 表）。域名 `juocho.kdns.fr` 走 Cloudflare 灰云解析到该机。
+- **GitHub**：`https://github.com/LinYoNv/aitag-site`，分支 `main`；推送用 `http://127.0.0.1:7897` 代理 + 凭据 helper（一次性注入）。
+- **API 测试小抄**（hk3 本机）：注册→登录→me→上传→登出，见 `login-register-progress.md` §自测。
 
 ---
 
