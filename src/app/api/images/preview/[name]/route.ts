@@ -8,20 +8,21 @@ export const runtime = "nodejs";
 
 // 上传图片存储目录（运行时数据）
 const UPLOAD_DIR = path.join(process.cwd(), "data", "uploads");
-const THUMB_DIR = path.join(UPLOAD_DIR, "thumb");
+const PREVIEW_DIR = path.join(UPLOAD_DIR, "preview");
 // 兼容：早期上传的图在 public/images/uploads（重启后静态可用）
 const LEGACY_DIR = path.join(process.cwd(), "public", "images", "uploads");
 // 更早的存量作品图在 public/images/works（静态目录，未走 API）
 const WORKS_DIR = path.join(process.cwd(), "public", "images", "works");
 
-// 缩略图配置：画廊卡片展示宽度 480px，WebP 质量 80
-const THUMB_WIDTH = 480;
-const THUMB_QUALITY = 80;
+// 详情页预览图配置：1400px WebP 质量 82（比 thumb 大、比原图小 10 倍+，肉眼几乎无差）
+const PREVIEW_WIDTH = 1400;
+const PREVIEW_QUALITY = 82;
 
 /**
- * 缩略图路由：请求 /api/images/thumb/<原文件名>
- * 首次访问用 sharp 生成 480px WebP 缩略图并缓存到 data/uploads/thumb/，
- * 之后直接读缓存。画廊（列表页）用缩略图，详情页仍用原图（/api/images/）。
+ * 详情页预览图路由：请求 /api/images/preview/<原文件名>
+ * 生成 1400px WebP 并缓存到 data/uploads/preview/。
+ * 详情页网格用预览图（首屏秒开），点开灯箱才加载原图（/api/images/）。
+ * 参照 aitag.win：全站 WebP 多档尺寸，避免一次拉 1-3MB 原图。
  */
 export async function GET(
   _req: NextRequest,
@@ -34,13 +35,13 @@ export async function GET(
     return new NextResponse("Bad Request", { status: 400 });
   }
 
-  // 缩略图缓存路径：u_xxx.png -> thumb/u_xxx.webp
+  // 预览图缓存路径：u_xxx.png -> preview/u_xxx.webp
   const base = path.basename(name, path.extname(name));
-  const thumbPath = path.join(THUMB_DIR, `${base}.webp`);
+  const previewPath = path.join(PREVIEW_DIR, `${base}.webp`);
 
   // 命中缓存直接返回
-  if (fs.existsSync(thumbPath) && thumbPath.startsWith(THUMB_DIR)) {
-    const buf = fs.readFileSync(thumbPath);
+  if (fs.existsSync(previewPath) && previewPath.startsWith(PREVIEW_DIR)) {
+    const buf = fs.readFileSync(previewPath);
     return new NextResponse(new Uint8Array(buf), {
       headers: {
         "Content-Type": "image/webp",
@@ -63,16 +64,16 @@ export async function GET(
   }
 
   try {
-    // 生成缩略图
+    // 生成预览图
     const buf = await sharp(filePath)
-      .resize({ width: THUMB_WIDTH, withoutEnlargement: true })
-      .webp({ quality: THUMB_QUALITY })
+      .resize({ width: PREVIEW_WIDTH, withoutEnlargement: true })
+      .webp({ quality: PREVIEW_QUALITY })
       .toBuffer();
 
     // 缓存到磁盘（失败不影响本次返回）
     try {
-      fs.mkdirSync(THUMB_DIR, { recursive: true });
-      fs.writeFileSync(thumbPath, buf);
+      fs.mkdirSync(PREVIEW_DIR, { recursive: true });
+      fs.writeFileSync(previewPath, buf);
     } catch {
       // 忽略缓存写失败（内存中仍可返回）
     }
@@ -84,7 +85,7 @@ export async function GET(
       },
     });
   } catch (e) {
-    console.error("thumbnail generate error:", e);
+    console.error("preview generate error:", e);
     // 生成失败时回退原图（保证可用性）
     try {
       const orig = fs.readFileSync(filePath);

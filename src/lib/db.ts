@@ -7,6 +7,7 @@ import path from "node:path";
 import fs from "node:fs";
 import crypto from "node:crypto";
 import type { Work, WorkListItem, PagedWorks } from "./types";
+import { toThumbUrl } from "./format";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "aitag.db");
@@ -137,9 +138,7 @@ function toListItem(w: Work): WorkListItem {
     author_name: w.author_name,
     total_view: w.total_view,
     total_bookmarks: w.total_bookmarks,
-    cover: w.images[0]
-      ? w.images[0].replace("/api/images/", "/api/images/thumb/")
-      : "",
+    cover: w.images[0] ? toThumbUrl(w.images[0]) : "",
   };
 }
 

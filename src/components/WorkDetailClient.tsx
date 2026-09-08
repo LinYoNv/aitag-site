@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import type { Work } from "@/lib/types";
-import { typeLabel, typeClass, formatDate } from "@/lib/format";
+import { typeLabel, typeClass, formatDate, toPreviewUrl } from "@/lib/format";
 import { getPerImageMetas } from "@/lib/types";
 import CardMetaView from "@/components/CardMetaView";
 import Lightbox from "@/components/Lightbox";
@@ -257,10 +257,16 @@ export default function WorkDetailClient({ work, canDelete, isAdmin }: Props) {
                   aria-label={`放大查看图片 ${i + 1}`}
                   title="点击放大查看"
                 >
+                  {/* 网格用 1400px WebP 预览图（首屏秒开），灯箱里才是原图 */}
                   <img
-                    src={img}
+                    src={toPreviewUrl(img)}
                     alt={`${work.title || work.id} ${i + 1}`}
                     loading="lazy"
+                    onError={(e) => {
+                      // 预览图缺失时回退原图（保证不空白）
+                      const el = e.currentTarget;
+                      if (el.src !== img) el.src = img;
+                    }}
                   />
                 </button>
                 <CardMetaView
