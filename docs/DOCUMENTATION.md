@@ -58,7 +58,7 @@ systemctl reload caddy          # 改 Caddyfile 后重载
 | 功能 | 说明 | 入口 |
 |---|---|---|
 | 登录 | 用户名+密码，session cookie（30 天，httpOnly+lax） | `/login` |
-| 注册 | 开放注册，普通 user；用户名 2-30 字符（字母数字下划线中文），密码≥8 | `/register` |
+| 注册 | 开放注册，普通 user；用户名 2-30 字符（字母数字下划线中文），密码≥8；**用户名查重与登录均大小写不敏感**（Admin/admin 同名），且禁用系统保留名（admin/root/官方/客服 等，防冒充——用户名默认作为作品作者名展示） | `/register` |
 | 整站门控 | 未登录访问任何页面 → 307 跳 `/login` | 全局 |
 | 画廊 | 栅格展示 + 搜索（ID/作者/标签/参数/正向prompt）+ **屏蔽 tag（黑名单）** + 排序（最新/最旧/最多收藏）+ 分页 + 悬浮预览 + **缩略图**（480px WebP 懒加载） | `/` |
 | 作品详情 | 多图 Grid 卡片（**1400px WebP 预览图**），每图参数一体（指令/JSON 切换 + Prompt/Negative/画师复制 + **图片下载按钮**），**灯箱放大**（←→/按钮/触屏滑动切换 + 右侧参数面板） | `/i/[id]` |
@@ -339,7 +339,8 @@ systemctl reload caddy          # 改 Caddyfile 后重载
 22. **修改密码 + R18G 屏蔽（2026-09-09，commit 3ac6488）**：`POST /api/me/password` 校验旧密码（scrypt + 恒定时间比较），新密码 ≥8 位且不同于旧密码。R18G 偏好存 `users.r18g_pref`（`{enabled, selected, custom}`）；`/api/works` 与用户主页按**浏览者**偏好过滤：开启且未选词时用默认词（粪便 + 纯兽人组），否则用勾选词 + 自定义词。过滤靠 `getDb()` 注册的 SQLite 自定义函数 `has_pos_tag`——只匹配结构化正向 prompt（顶层 + per_image），词边界 + 大小写不敏感；负向 uc 与 rawJson/_raw.workflow 从不匹配。
 23. **ComfyUI 角色传播式提示词提取（2026-09-08，commit 233b6a5）**：`parseComfyUi` 不再依赖节点名白名单，从采样器 positive/negative 端口沿引用链反向遍历取文本（字段名点名角色优先，与当前链路相反角色的字段跳过防污染，JoinStringMulti/Concatenate 按 delimiter 拼接）；节点叫什么名字都能覆盖。
 24. **详情页图片下载按钮（2026-09-09，commit 3f71e76）**：`CardMetaView` 每图参数区提供下载按钮（fetch → blob → `aitag-image-N.<ext>` 下载；失败降级为新窗口打开原图）。
-25. **生图台（2026-09-14）**：`/studio`（requireLogin）全屏内嵌 `public/studio/` 静态面板（index.html + app.css + app.js，UI 移植自 nai_image test-panel 并保持其 ENDFIELD 视觉）。后端 `src/lib/studio.ts` 双上游：
+25. **用户名唯一性大小写不敏感（2026-09-14，commit 50f4105）**：users 表加 `lower(username)` 唯一索引，`getUserByUsername` 查重与登录均不区分大小写；注册拒绝系统保留名（admin/administrator/root/system/official/moderator/mod/staff/support/aitag/管理员/官方/系统/客服/站长）——用户名默认作为作品作者名展示，防冒充管理员/官方。
+26. **生图台（2026-09-14）**：`/studio`（requireLogin）全屏内嵌 `public/studio/` 静态面板（index.html + app.css + app.js，UI 移植自 nai_image test-panel 并保持其 ENDFIELD 视觉）。后端 `src/lib/studio.ts` 双上游：
     - **direct**（nai.sta1n.cn）：`GET /generate?tag&token&model&artist&size&steps&scale&cfg&sampler&negative&nocache=1&noise_schedule`，响应=图片字节；画师串走独立 `artist` 参数；**cfg 仅此链路发送**。
     - **openai**（api.syuan.org 等）：NAI 模型按 nai_image 契约——`/v1/images/generations` 顶层 `prompt/size/n/model/action` + `parameters{steps,scale,sampler,noise_schedule,seed,negative_prompt,reference_image_multiple,reference_strength_multiple,director_reference_*,use_coords,characterPrompts,v4_prompt}`，img2img 走 `/v1/images/edits`；尺寸契约 64 倍数/最大边 1920/面积 3686400（4K 档降级 2K）；参考图 ≤8 张，img2img 用 sharp 精确 cover 到目标尺寸、vibe/director 等比缩限；重试 408/429/502/503/504 + "稍后重试"类文案（2/4/8s 退避），超时不重试。gpt-image 模型（`gpt-image-*`）自动切换官方参数面：`quality/background/output_format`，参考图走 `/v1/images/edits` multipart `image[]`，NAI 参数自动忽略。
     - **密钥用户自配（2026-09-14 起）**：站点只提供默认 URL（`https://api.syuan.org` / `https://nai.sta1n.cn`，可在个人资料设置覆盖），每个用户在「个人资料设置 → 生图台密钥」填自己的 OpenAI Key / sta1n Token，生图消耗各自的额度。密钥明文存 `users.studio_cfg`（服务端调上游必需；`/api/me/studio` 与 `/api/studio/config` 一律不回显，GET 只给 `已配置/未配置` 状态）。未配置时生图返回 400 并引导去个人资料设置；`POST /api/me/studio` 支持 `probe_direct` 测试 sta1n Token（`POST /api/api/getUser`，响应体 `status:"error"` 视为无效）。
