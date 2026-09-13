@@ -210,7 +210,7 @@ Query 参数：
 ```
 用户自配密钥走 `GET/POST/DELETE /api/me/studio`（见 §1.7）；密钥明文存 `users.studio_cfg`，服务端调上游使用。
 
-### 4.5.3 生成 `POST /api/studio/generate`
+### 4.5.2 生成 `POST /api/studio/generate`
 需登录。**限流：20 次/小时/用户 + 40 次/小时/IP**（生图消耗上游额度）。请求体（与生图台面板同构）：
 
 | 字段 | 说明 |

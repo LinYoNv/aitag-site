@@ -66,7 +66,7 @@ systemctl reload caddy          # 改 Caddyfile 后重载
 | 上传 | 3 种方式（NAI/ComfyUI/无参数），上传时可编辑完整参数；**PNG 唯一真相源**（后端权威解析）+ **内容去重**（SHA-256，相同图只存一份文件） | `/upload` |
 | 删除作品 | 管理员删全部；作者删自己的；顺带删图片文件 | 详情页按钮 |
 | 头像下拉菜单 | 头部最右圆形头像（可上传/默认图标），点击弹出【我的主页】【个人资料设置】【登出】；**黄色「管理员」徽标仅 admin 可见** | 头部 |
-| 个人资料 | 更换头像（PNG/JPG/WebP ≤2MB）+ 用户名/角色/昵称/注册时间 + **修改密码** + API Token 管理 + **R18G 屏蔽偏好** | `/profile` |
+| 个人资料 | 更换头像（PNG/JPG/WebP ≤2MB）+ 用户名/角色/昵称/注册时间 + **修改密码** + API Token 管理 + **生图台密钥**（OpenAI 兼容 Key / sta1n Token，站点只默认提供 URL） + **R18G 屏蔽偏好** | `/profile` |
 | 用户主页 | 参照 Pixiv：头像/用户名/管理员徽章/注册时间资料卡 + 统计行（作品/点赞/收藏/浏览）+ **作品\|收藏 Tab 滑块** | `/u/[username]` |
 | API Token | 账号绑定凭证，供外部插件走接口上传鉴权；明文只显示一次，库里存 SHA-256 哈希；可重新生成（旧的立即失效） | `/profile` |
 | R18G 屏蔽 | 用户级内容屏蔽：分组中英对照勾选（粪便/排尿/兽人/血腥/吞噬）+ 自定义词，只匹配**正向 prompt 词边界**；画廊与用户主页列表均生效 | `/profile` |
@@ -156,7 +156,7 @@ systemctl reload caddy          # 改 Caddyfile 后重载
 | `/login` `/register` | 动态 | 已登录访问则 redirect `/` |
 | `/upload` | 动态 | 上传页（requireLogin） |
 | `/i/[id]` | 动态 | 详情页（requireLogin + canDelete/isAdmin） |
-| `/profile` | 动态 | 个人资料（requireLogin）：换头像 + 信息 + 修改密码 + API Token + R18G 屏蔽偏好 |
+| `/profile` | 动态 | 个人资料（requireLogin）：换头像 + 信息 + 修改密码 + API Token + **生图台密钥** + R18G 屏蔽偏好 |
 | `/u/[username]` | 动态 | 用户主页（requireLogin，参照 Pixiv）：资料卡 + 统计 + 作品\|收藏 Tab |
 | `/studio` | 动态 | 生图台入口（requireLogin）：全屏内嵌 `public/studio/index.html` 面板（独立静态页，API 层走 `/api/studio/*`） |
 
@@ -254,6 +254,7 @@ systemctl reload caddy          # 改 Caddyfile 后重载
 | `me/token/route.ts` | API Token：GET 查 `{hasToken}`（不返回明文）/ POST 生成重置 `{token}`（明文一次） |
 | `me/password/route.ts` | 修改密码（校验旧密码，新密码 ≥8 位且不同于旧密码） |
 | `me/pref/route.ts` | R18G 屏蔽偏好：GET 读 / POST 存（selected 按词表校验、custom ≤40 字符） |
+| `me/studio/route.ts` | 生图台个人密钥：GET 状态（脱敏）/ POST 保存（密钥留空=不变，clear=清除，URL 留空=默认；`probe_direct` 测直连 Token）/ DELETE 清除 |
 | `avatars/[name]/route.ts` | 服务头像文件 |
 | `works/route.ts` | 作品列表+搜索+分页（支持 author 过滤；**需登录**；自动应用浏览者 R18G 屏蔽偏好） |
 | `works/[id]/route.ts` | 详情 GET（含画师补算）/ 删除 DELETE（权限） |
@@ -278,7 +279,7 @@ systemctl reload caddy          # 改 Caddyfile 后重载
 | `r18g-tags.ts` | R18G 屏蔽词表（5 组中英对照 + 自定义组）、默认屏蔽词、偏好展开 |
 | `ratelimit.ts` | 进程内滑动窗口限流器（登录/注册/上传/头像/生图各自独立窗口）+ clientIp（x-forwarded-for 首段） |
 | `studio-presets.ts` | 生图台共享预设：模型/尺寸/采样器/画师串风格/默认负面词、NAI 尺寸契约归一化（前后端通用） |
-| `studio.ts` | 生图台上游调用（server-only）：配置读写（`data/studio.json` + 环境变量优先）、NAI OpenAI 兼容提交（vibe/director/img2img/director-tools/多角色，参考图 sharp 预处理）、gpt-image 提交（JSON/multipart）、sta1n 直连 GET、重试与错误翻译 |
+| `studio.ts` | 生图台上游调用（server-only）：用户级配置（`users.studio_cfg` 读写 + 默认 URL 常量）、NAI OpenAI 兼容提交（vibe/director/img2img/director-tools/多角色，参考图 sharp 预处理）、gpt-image 提交（JSON/multipart）、sta1n 直连 GET、重试与错误翻译 |
 
 ### 组件（`src/components/`）
 | 文件 | 用途 |
@@ -292,7 +293,7 @@ systemctl reload caddy          # 改 Caddyfile 后重载
 | `UploadPageClient.tsx` | 上传页（client）：拖拽/多图/PNG 解析/共用标题 |
 | `LoginForm.tsx` `RegisterForm.tsx` | 登录/注册表单（client） |
 | `UserBadge.tsx` | **头像下拉菜单**：圆形头像（有图显示/无则 SVG 人形默认）、管理员金色徽标（仅 admin）、点击弹出【我的主页】【个人资料设置】【登出】、点外部关闭、`ml-auto` 贴最右 |
-| `ProfileClient.tsx` | 个人资料页（client）：换头像 + 信息展示 + **修改密码** + API Token 生成/复制/重新生成 + **R18G 屏蔽偏好开关/弹窗** |
+| `ProfileClient.tsx` | 个人资料页（client）：换头像 + 信息展示 + **修改密码** + API Token 生成/复制/重新生成 + **生图台密钥配置**（双后端地址/密钥、保存/测试直连/清除） + **R18G 屏蔽偏好开关/弹窗** |
 | `UserPageClient.tsx` | 用户主页（client）：资料卡 + 统计行 + 作品\|收藏 Tab 滑块（GalleryCard 网格） |
 | `R18gPickerModal.tsx` | R18G 屏蔽词勾选弹窗：分组中英对照 + 搜索过滤 + 自定义词输入 + 搜索预览（保存走 `/api/me/pref`） |
 
