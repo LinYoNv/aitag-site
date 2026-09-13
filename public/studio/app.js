@@ -1268,8 +1268,8 @@
       const form = new FormData();
       form.append("files", file);
       form.append("ai_type", isGptModel(body.model) ? "other" : "nai");
-      const title = (body.nai_prompt || body.nl_prompt || "").trim();
-      form.append("title", title ? title.slice(0, 60) : "");
+      // 标题用站点默认(作品 <id 前 6 位>),不拿提示词当标题
+      form.append("title", "");
       // 参数 meta：图库详情页按 NAI 格式渲染（gpt-image 模型名附画质信息）
       const wh = String(body.size || "").match(/^(\d+)x(\d+)$/);
       const modelLabel = isGptModel(body.model)

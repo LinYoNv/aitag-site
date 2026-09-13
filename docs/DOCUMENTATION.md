@@ -109,7 +109,7 @@ systemctl reload <反代服务>    # 改反代配置后重载
 | GET | `/api/me/studio` | 登录 | — | 200 `{ok,config:{openai:{configured,base_url},direct:{...}}}`（个人生图密钥状态） |
 | POST | `/api/me/studio` | 登录 | JSON `{openai:{base_url?,api_key?,clear_api_key?},direct:{base_url?,token?,clear_token?},probe_direct?}`；密钥留空=不变，clear=清除，URL 留空=回退默认 | 200 `{ok,config,probe?}` |
 | DELETE | `/api/me/studio?target=openai_key\|direct_token` | 登录 | — | 200 `{ok,config}`（清除对应密钥） |
-| POST | `/api/studio/generate` | 登录 | JSON `{call_format:"direct"\|"openai", nai_prompt, nl_prompt?, style?, custom_artists?, negative?, size, model?, n?, steps?, scale?, cfg?, sampler?, noise_schedule?, seed?, reference_mode?, reference_image_b64_list?, reference_strengths?, director_action?, characters?, quality?, background?, output_format?}` | 200 `{ok,data:[{b64_json,ext}],merge_info,meta}`（限流 20 次/时/用户 + 40 次/时/IP）；429/502/504 |
+| POST | `/api/studio/generate` | 登录 | JSON `{call_format:"direct"\|"openai", nai_prompt, nl_prompt?, style?, custom_artists?, negative?, size, model?, n?, steps?, scale?, cfg?, sampler?, noise_schedule?, seed?, reference_mode?, reference_image_b64_list?, reference_strengths?, director_action?, characters?, quality?, background?, output_format?}` | 200 `{ok,data:[{b64_json,ext}],merge_info,meta}`（不限次数，消耗用户自有额度）；502/504 |
 
 `user` 序列化（`safeUser`）字段：`id, username, role("admin"|"user"), author_name, avatar, create_date`（**不含密码哈希**）。
 

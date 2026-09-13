@@ -214,7 +214,7 @@ Query 参数：
 用户自配密钥走 `GET/POST/DELETE /api/me/studio`（见 §1.7）；密钥服务端加密存 `users.studio_cfg`，调上游使用。
 
 ### 4.5.2 生成 `POST /api/studio/generate`
-需登录。**限流：20 次/小时/用户 + 40 次/小时/IP**（生图消耗上游额度）。请求体（与生图台面板同构）：
+需登录。不限次数（消耗用户自有上游额度）。请求体（与生图台面板同构）：
 
 | 字段 | 说明 |
 |---|---|
@@ -233,7 +233,7 @@ Query 参数：
 
 响应：
 - `200` `{ "ok": true, "data": [{ "b64_json": "...", "ext": "png" }], "merge_info": { "nai_prompt", "nl_prompt", "artists", "full_prompt" }, "meta": { "backend", "kind": "nai"|"gptimage", "model", "size", "n", "elapsed_ms", "user" } }`
-- `400` 参数缺失（如 director-tools 无源图）或**用户未配置对应后端密钥**（reason 为 `key_not_configured`，文案引导到个人资料设置）；`413` 请求体过大（参考图总量 >96MB / 单张 data URI >11MB 被忽略）；`429` 限流；`502` 上游错误（`error` 已翻译，含 `upstream_blocked` = 上游地址未通过安全校验）；`504` 超时（上游可能仍在生成，不自动重试）。prompt/negative 服务端截断（8000/4000 字符）
+- `400` 参数缺失（如 director-tools 无源图）或**用户未配置对应后端密钥**（reason 为 `key_not_configured`，文案引导到个人资料设置）；`413` 请求体过大（参考图总量 >96MB / 单张 data URI >11MB 被忽略）；`502` 上游错误（`error` 已翻译，含 `upstream_blocked` = 上游地址未通过安全校验）；`504` 超时（上游可能仍在生成，不自动重试）。prompt/negative 服务端截断（8000/4000 字符）
 
 ---
 
@@ -264,7 +264,7 @@ Query 参数：
 | 2026-09-14 | `/api/me/studio` 新增 `probe:"openai"|"direct"` 分端测试；生图台 OpenAI 模式隐藏 CFG Rescale（该端点不提交） | 个人资料页两框各自「测试」按钮 |：base_url 强制 https 公网、个人密钥加密存储、prompt/参考图/请求体上限；`/api/works?block_tags` 恢复生效（≤20 词）；R18G 自定义词 ≤50 | 合法使用无感；内网上游地址被拒 |
 | 2026-09-14 | 注册：用户名唯一性改大小写不敏感（unique 索引重建）+ 系统保留名黑名单 | 与既有用户仅大小写不同的用户名无法再注册；登录不区分大小写 |
 | 2026-09-14 | 生图台密钥改为**用户自配**：新增 `/api/me/studio`（GET/POST/DELETE）；`/api/studio/config` 改为当前用户状态快照（移除管理员 POST）；生成时按用户密钥调用上游 | 未配置密钥的用户生图返回 400 引导配置；消耗各自的额度 |
-| 2026-09-14 | 新增生图台接口：`GET/POST /api/studio/config`、`POST /api/studio/generate`（NAI 直连 + OpenAI 兼容 NAI 全系 + gpt-image） | 面板调用；限流 20 次/时/用户、40 次/时/IP |
+| 2026-09-14 | 新增生图台接口：`GET/POST /api/studio/config`、`POST /api/studio/generate`（NAI 直连 + OpenAI 兼容 NAI 全系 + gpt-image） | 面板调用；不限次数（用户自有额度） |
 | 2026-09-14 | 文档修正：`GET /api/works/[id]` 响应不含 `user_liked`/`user_bookmarked`（此前示例多写了这两个字段，代码从未返回） | 仅文档修正，代码无变化 |
 | 2026-09-09 | 新增 `POST /api/me/password`（修改密码）与 `GET/POST /api/me/pref`（R18G 屏蔽偏好） | 外部脚本可自助改密/管理偏好 |
 | 2026-09-09 | `GET /api/works`：登录用户开启 R18G 屏蔽时，服务端自动按其偏好过滤结果 | 同一凭证下列表结果可能少于全量 |

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/lib/auth";
-import { rateLimit, clientIp } from "@/lib/ratelimit";
 import {
   resolveUserStudio,
   DEFAULT_NAI_OPENAI_MODEL,
@@ -68,17 +67,6 @@ export async function POST(req: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "未登录" }, { status: 401 });
   }
-  // 限流：每用户 20 次/小时 + 每 IP 40 次/小时（生图消耗上游额度）
-  if (
-    !rateLimit(`stu:user:${user.id}`, 20, 60 * 60 * 1000) ||
-    !rateLimit(`stu:ip:${clientIp(req)}`, 40, 60 * 60 * 1000)
-  ) {
-    return NextResponse.json(
-      { error: "生图过于频繁（每小时 20 次），请稍后再试" },
-      { status: 429 },
-    );
-  }
-
   // 请求体上限：8 张参考图的 data URI 是主要体积来源，超限直接拒绝防内存打爆
   const contentLength = Number(req.headers.get("content-length") ?? 0);
   if (contentLength > 96 * 1024 * 1024) {
