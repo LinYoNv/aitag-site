@@ -646,6 +646,7 @@
     const gpt = currentModelIsGpt();
     const openai = currentCallFormat === "openai";
     if (gpt) {
+      // gpt-image:官方参数面,NAI 的采样参数/风格/负面全不适用
       if (els.gptImageWrap) show(els.gptImageWrap);
       [els.samplerField, els.stepsField, els.scaleField, els.cfgField, els.noiseScheduleField]
         .forEach((el) => hide(el));
@@ -655,8 +656,12 @@
       hide(els.charListWrap);
     } else {
       if (els.gptImageWrap) hide(els.gptImageWrap);
-      [els.samplerField, els.stepsField, els.scaleField, els.cfgField, els.noiseScheduleField]
+      [els.samplerField, els.stepsField, els.scaleField, els.noiseScheduleField]
         .forEach((el) => show(el));
+      // CFG Rescale 只有 NAI 直连(GET /generate 的 cfg 参数)接收;
+      // OpenAI 兼容端点不提交该参数(nai_image 同款契约),故仅直连显示
+      if (openai) hide(els.cfgField);
+      else show(els.cfgField);
       show(els.styleCard);
       if (openai) {
         show(els.openaiSeedWrap);

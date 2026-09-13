@@ -579,18 +579,25 @@ export function setUserPref(userId: string, pref: R18GPref): void {
 // 密文格式 "enc:v1:<iv>:<tag>:<data>"（均 base64）；旧明文兼容读取，下次保存自动转密文。
 let studioSecretCache: Buffer | null | undefined;
 
+/**
+ * 返回密钥材料 = 密钥字符串本身的字节（env 值或文件里的 64 hex 字符串）。
+ * AES 密钥统一 = sha256(材料) —— 两个来源分支必须同一派生方式（2026-09-14 修复：
+ * 原先文件分支直接用 hex 解码字节当 key、env 分支用 sha256，互相读不开）。
+ * env 与文件内容相同（env=文件的 64 hex 字符串）时两者等价可互换。
+ * 来源优先级：AITAG_STUDIO_SECRET env（≥32 字符）> data/studio.secret（64 hex）
+ */
 function getStudioSecret(): Buffer | null {
   if (studioSecretCache !== undefined) return studioSecretCache;
   const env = process.env.AITAG_STUDIO_SECRET;
   if (env && env.length >= 32) {
-    studioSecretCache = crypto.createHash("sha256").update(env).digest();
+    studioSecretCache = Buffer.from(env, "utf8");
     return studioSecretCache;
   }
   const secretPath = path.join(DATA_DIR, "studio.secret");
   try {
     const raw = fs.readFileSync(secretPath, "utf8").trim();
     if (/^[0-9a-f]{64}$/.test(raw)) {
-      studioSecretCache = Buffer.from(raw, "hex");
+      studioSecretCache = Buffer.from(raw, "utf8");
       return studioSecretCache;
     }
   } catch {
@@ -599,12 +606,19 @@ function getStudioSecret(): Buffer | null {
   const generated = crypto.randomBytes(32).toString("hex");
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(secretPath, generated + "\n", { mode: 0o600 });
-  studioSecretCache = Buffer.from(generated, "hex");
+  studioSecretCache = Buffer.from(generated, "utf8");
   return studioSecretCache;
 }
 
+/** AES-256-GCM 密钥 = sha256(密钥材料)，加解密唯一入口 */
+function getStudioAesKey(): Buffer | null {
+  const material = getStudioSecret();
+  if (!material) return null;
+  return crypto.createHash("sha256").update(material).digest();
+}
+
 function encryptStudioCfg(plain: string): string {
-  const key = getStudioSecret();
+  const key = getStudioAesKey();
   if (!key) return plain;
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
@@ -617,7 +631,7 @@ function decryptStudioCfg(stored: string): string {
   if (!stored.startsWith("enc:v1:")) return stored;
   try {
     const [ivB64, tagB64, dataB64] = stored.slice("enc:v1:".length).split(":");
-    const key = getStudioSecret();
+    const key = getStudioAesKey();
     if (!key) return "";
     const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(ivB64, "base64"));
     decipher.setAuthTag(Buffer.from(tagB64, "base64"));

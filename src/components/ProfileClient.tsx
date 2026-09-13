@@ -53,6 +53,11 @@ export default function ProfileClient({ user }: Props) {
   const [studioLoaded, setStudioLoaded] = useState(false);
   const [studioMsg, setStudioMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [studioSaving, setStudioSaving] = useState(false);
+  // 各框独立测试（允许只配一端的用户只测自己那端）
+  const [openaiProbeMsg, setOpenaiProbeMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [directProbeMsg, setDirectProbeMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [openaiProbing, setOpenaiProbing] = useState(false);
+  const [directProbing, setDirectProbing] = useState(false);
 
   // 挂载时查询是否已有 token（不返回明文，仅判断状态）
   useEffect(() => {
@@ -230,9 +235,9 @@ export default function ProfileClient({ user }: Props) {
     [saveR18GPref, r18gEnabled],
   );
 
-  // 生图台密钥：保存（密钥留空 = 保持不变）+ 可选测试直连 Token
+  // 生图台密钥：保存（密钥留空 = 保持不变）。测试按钮在各框内独立触发。
   const saveStudioKeys = useCallback(
-    async (opts?: { probeDirect?: boolean; clearOpenaiKey?: boolean; clearDirectToken?: boolean }) => {
+    async (opts?: { clearOpenaiKey?: boolean; clearDirectToken?: boolean }) => {
       setStudioSaving(true);
       setStudioMsg(null);
       try {
@@ -250,26 +255,18 @@ export default function ProfileClient({ user }: Props) {
               token: studioDirectToken,
               clear_token: opts?.clearDirectToken === true,
             },
-            probe_direct: opts?.probeDirect === true,
           }),
         });
         const data = (await res.json()) as {
           ok?: boolean;
           config?: { openai: { configured: boolean; base_url: string }; direct: { configured: boolean; base_url: string } };
-          probe?: { ok: boolean; message: string } | null;
           error?: string;
         };
         if (res.ok && data.ok && data.config) {
           setStudioStatus(data.config);
           setStudioOpenaiKey("");
           setStudioDirectToken("");
-          let text = "✓ 已保存";
-          if (opts?.probeDirect && data.probe) {
-            text += data.probe.ok
-              ? `，直连 Token 有效`
-              : `，但直连 Token 测试失败：${data.probe.message}`;
-          }
-          setStudioMsg({ ok: opts?.probeDirect ? (data.probe?.ok ?? true) : true, text });
+          setStudioMsg({ ok: true, text: "✓ 已保存" });
         } else {
           setStudioMsg({ ok: false, text: data.error ?? "保存失败" });
         }
@@ -281,6 +278,78 @@ export default function ProfileClient({ user }: Props) {
     },
     [studioOpenaiUrl, studioOpenaiKey, studioDirectUrl, studioDirectToken],
   );
+
+  // OpenAI 端测试：先保存再发一次最小真实生图（消耗少量用户自己的额度）
+  const testOpenaiKey = useCallback(async () => {
+    setOpenaiProbing(true);
+    setOpenaiProbeMsg(null);
+    try {
+      const res = await fetch("/api/me/studio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          openai: { base_url: studioOpenaiUrl, api_key: studioOpenaiKey },
+          probe: "openai",
+        }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        config?: { openai: { configured: boolean; base_url: string } };
+        probe?: { ok: boolean; message: string } | null;
+        error?: string;
+      };
+      if (res.ok && data.ok && data.config) {
+        setStudioStatus((prev) => ({ openai: data.config!.openai, direct: prev?.direct ?? { configured: false, base_url: "" } }));
+        setStudioOpenaiKey("");
+      }
+      const p = data.probe;
+      setOpenaiProbeMsg(
+        p
+          ? { ok: p.ok, text: p.ok ? `✓ ${p.message}` : `✗ ${p.message}` }
+          : { ok: false, text: `✗ ${data.error ?? "测试失败"}` },
+      );
+    } catch {
+      setOpenaiProbeMsg({ ok: false, text: "✗ 网络错误" });
+    } finally {
+      setOpenaiProbing(false);
+    }
+  }, [studioOpenaiUrl, studioOpenaiKey]);
+
+  // 直连端测试：先保存再用 getUser 探测（免费）
+  const testDirectToken = useCallback(async () => {
+    setDirectProbing(true);
+    setDirectProbeMsg(null);
+    try {
+      const res = await fetch("/api/me/studio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          direct: { base_url: studioDirectUrl, token: studioDirectToken },
+          probe: "direct",
+        }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        config?: { direct: { configured: boolean; base_url: string } };
+        probe?: { ok: boolean; message: string } | null;
+        error?: string;
+      };
+      if (res.ok && data.ok && data.config) {
+        setStudioStatus((prev) => ({ openai: prev?.openai ?? { configured: false, base_url: "" }, direct: data.config!.direct }));
+        setStudioDirectToken("");
+      }
+      const p = data.probe;
+      setDirectProbeMsg(
+        p
+          ? { ok: p.ok, text: p.ok ? `✓ ${p.message}` : `✗ ${p.message}` }
+          : { ok: false, text: `✗ ${data.error ?? "测试失败"}` },
+      );
+    } catch {
+      setDirectProbeMsg({ ok: false, text: "✗ 网络错误" });
+    } finally {
+      setDirectProbing(false);
+    }
+  }, [studioDirectUrl, studioDirectToken]);
 
   const clearStudioKey = useCallback(async (target: "openai_key" | "direct_token") => {
     setStudioSaving(true);
@@ -477,11 +546,26 @@ export default function ProfileClient({ user }: Props) {
                   type="password"
                   value={studioOpenaiKey}
                   onChange={(e) => setStudioOpenaiKey(e.target.value)}
-                  disabled={!studioLoaded || studioSaving}
+                  disabled={!studioLoaded || studioSaving || openaiProbing}
                   placeholder={studioStatus?.openai.configured ? "已保存，留空保持不变" : "sk-..."}
                   autoComplete="new-password"
                   className="w-full bg-[#151922] border border-[#262b36] rounded-md px-2.5 py-1.5 text-xs text-[#e6edf3] font-mono outline-none focus:border-[#4c9fff] disabled:opacity-40"
                 />
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    onClick={() => void testOpenaiKey()}
+                    disabled={!studioLoaded || openaiProbing}
+                    className="text-xs bg-[#151922] border border-[#262b36] text-[#e6edf3] px-3 py-1.5 rounded-lg hover:border-[#4c9fff] disabled:opacity-50"
+                  >
+                    {openaiProbing ? "测试中（约 10-60 秒）…" : "测试密钥"}
+                  </button>
+                  <span className="text-[11px] text-[#5a6270]">发送一次最小生图验证（消耗你自己约 1 点额度）</span>
+                </div>
+                {openaiProbeMsg && (
+                  <p className={`text-xs mt-2 ${openaiProbeMsg.ok ? "text-green-400" : "text-red-400"}`}>
+                    {openaiProbeMsg.text}
+                  </p>
+                )}
               </div>
               <div className="bg-[#0f1218] border border-[#262b36] rounded-lg p-3">
                 <div className="flex items-center justify-between mb-2">
@@ -517,11 +601,26 @@ export default function ProfileClient({ user }: Props) {
                   type="password"
                   value={studioDirectToken}
                   onChange={(e) => setStudioDirectToken(e.target.value)}
-                  disabled={!studioLoaded || studioSaving}
+                  disabled={!studioLoaded || studioSaving || directProbing}
                   placeholder={studioStatus?.direct.configured ? "已保存，留空保持不变" : "toUserId"}
                   autoComplete="new-password"
                   className="w-full bg-[#151922] border border-[#262b36] rounded-md px-2.5 py-1.5 text-xs text-[#e6edf3] font-mono outline-none focus:border-[#4c9fff] disabled:opacity-40"
                 />
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    onClick={() => void testDirectToken()}
+                    disabled={!studioLoaded || directProbing}
+                    className="text-xs bg-[#151922] border border-[#262b36] text-[#e6edf3] px-3 py-1.5 rounded-lg hover:border-[#4c9fff] disabled:opacity-50"
+                  >
+                    {directProbing ? "测试中…" : "测试 Token"}
+                  </button>
+                  <span className="text-[11px] text-[#5a6270]">免费探测（不消耗额度）</span>
+                </div>
+                {directProbeMsg && (
+                  <p className={`text-xs mt-2 ${directProbeMsg.ok ? "text-green-400" : "text-red-400"}`}>
+                    {directProbeMsg.text}
+                  </p>
+                )}
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button
@@ -531,13 +630,7 @@ export default function ProfileClient({ user }: Props) {
                 >
                   {studioSaving ? "保存中…" : "保存密钥"}
                 </button>
-                <button
-                  onClick={() => void saveStudioKeys({ probeDirect: true })}
-                  disabled={!studioLoaded || studioSaving}
-                  className="text-sm bg-[#151922] border border-[#262b36] text-[#e6edf3] px-3 py-2 rounded-lg hover:border-[#4c9fff] disabled:opacity-50"
-                >
-                  保存并测试直连 Token
-                </button>
+                <span className="text-[11px] text-[#5a6270]">两端的「测试」按钮会先保存再验证，可只配其中一端</span>
                 {studioStatus?.openai.configured && (
                   <button
                     onClick={() => void clearStudioKey("openai_key")}
