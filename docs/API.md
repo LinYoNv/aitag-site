@@ -1,7 +1,7 @@
 # AI 咒语图库站 · HTTP API 文档
 
 > 线上地址：`https://juocho.kdns.fr`
-> 基于代码现状（commit `51ee583`）整理，2026-09-08。
+> 基于代码现状（commit `3ac6488`）整理，2026-09-14。
 > 变更记录见文末「变更日志」。本文档为调用方（外部插件/脚本）权威参考。
 
 ---
@@ -55,6 +55,27 @@
 需登录（个人资料页生成）。
 - `GET` → `200` `{ "ok": true, "hasToken": boolean }`（**不返回明文**）
 - `POST` → `200` `{ "ok": true, "token": "<64位hex>" }`（明文仅此一次；重置后旧 token 立即失效）
+
+### 1.6 修改密码 `POST /api/me/password`
+需登录。请求：
+```json
+{ "old_password": "旧密码", "new_password": "新密码" }
+```
+响应：
+- `200` `{ "ok": true }`
+- `403` `{ "error": "旧密码不正确" }`
+- `400` `{ "error": "新密码至少 8 位" | "新密码不能与旧密码相同" | ... }`
+
+### 1.7 R18G 屏蔽偏好 `GET/POST /api/me/pref`
+需登录。偏好存在账号上，`GET /api/works` 与用户主页会自动应用（见 3.1）。
+- `GET` → `200` `{ "ok": true, "pref": { "enabled": false, "selected": [], "custom": [] } }`
+- `POST` 请求：
+```json
+{ "pref": { "enabled": true, "selected": ["scat", "furry"], "custom": ["my_word"] } }
+```
+  - `selected` 仅接受预置词表里的 tag 英文名（自动小写校验，不在词表内的丢弃）
+  - `custom` 每个词 trim + 小写，≤40 字符
+  - → `200` `{ "ok": true, "pref": {...} }`（返回保存后的完整偏好）
 
 ---
 
@@ -112,6 +133,8 @@ Query 参数：
 | `author` | 按作者名精确过滤 |
 | `page` / `page_size` | 分页；`page_size` ≤ 50（默认 24） |
 
+> **R18G 自动过滤**：登录用户在个人资料页开启 R18G 屏蔽后，服务端自动把勾选词 + 自定义词（未选过词时用默认词）作为屏蔽条件——只匹配正向 prompt 的词边界命中。同一凭证下列表/详情结果可能因此少于全量；不想被过滤就关掉偏好。
+
 响应：`200`
 ```json
 {
@@ -128,7 +151,6 @@ Query 参数：
 ```json
 { "id", "title", "caption", "create_date", "ai_type", "image_count",
   "tags": [], "author_name", "total_view", "total_bookmarks", "total_likes",
-  "user_liked": false, "user_bookmarked": false,
   "images": ["/api/images/<file>", ...],
   "metadata": { "_format": "nai"|"comfyui"|"manual",
                 "prompt", "uc", "sampler", "steps", "seed", "model", "artists": [], ...,
@@ -136,6 +158,7 @@ Query 参数：
 ```
 - `401` 未登录；`404` 不存在。
 - NAI 作品 `artists` 为空时，读取时用增强逻辑即时补算（无需迁移）。
+- 注意：响应**不含** `user_liked`/`user_bookmarked`（点赞/收藏状态目前只在详情页 HTML 渲染时另查，无公开接口）。
 
 ### 3.3 删除作品 `DELETE /api/works/[id]`
 需登录 + 权限（管理员全权；作者删自己的）。
@@ -156,8 +179,54 @@ Query 参数：
 | 接口 | 权限 | 说明 |
 |---|---|---|
 | `GET /api/images/[name]` | 公开 | 作品原图；防目录穿越；MIME 按扩展名；Cache 1 天 |
-| `GET /api/images/thumb/[name]` | 公开 | 缩略图：首次访问 sharp 生成 480px WebP 缓存，之后直读 |
+| `GET /api/images/thumb/[name]` | 公开 | 缩略图（480px WebP）：首次访问 sharp 生成并缓存，之后直读 |
+| `GET /api/images/preview/[name]` | 公开 | 详情页预览图（1400px WebP）：首次访问 sharp 生成并缓存，之后直读 |
 | `GET /api/avatars/[name]` | 公开 | 头像图；Cache 1 天 |
+
+---
+
+## 4.5 生图台接口（2026-09-14 新增）
+
+### 4.5.1 配置快照 `GET /api/studio/config`
+需登录。返回脱敏配置（**绝不含完整密钥**）与面板所需常量：
+```json
+{ "ok": true,
+  "config": { "openai": { "configured": true, "base_url": "https://api.syuan.org", "api_key": "已配置", "default_model": "nai-diffusion-4-5-full" },
+              "direct": { "configured": true, "base_url": "https://nai.sta1n.cn", "token": "已配置", "default_model": "nai-diffusion-4-5-full" } },
+  "viewer_is_admin": false,
+  "openai_models": ["nai-diffusion-5-full", ...],
+  "gptimage_models": ["gpt-image-1"],
+  "default_negative": "...", "openai_vibe_strength": 0.6, "openai_director_strength": 1.0,
+  "openai_director_caption": "character&style" }
+```
+
+### 4.5.2 保存配置 `POST /api/studio/config`
+**仅管理员**（403 非管理员）。请求 `{ "openai": { "base_url", "api_key", "default_model" }, "direct": { "base_url", "token", "default_model" }, "probe_direct": false }`。
+- 密钥/Token **留空 = 保持不变**；`probe_direct: true` 时顺带校验直连 Token（`POST {direct}/api/api/getUser`）
+- `200` `{ "ok": true, "config": {...}, "probe": { "ok": true, "message": "..." } | null }`
+- 配置落 `data/studio.json`（不入库）；环境变量 `AITAG_STUDIO_OPENAI_BASE_URL/_API_KEY/_MODEL`、`AITAG_STUDIO_DIRECT_BASE_URL/_TOKEN/_MODEL` 优先
+
+### 4.5.3 生成 `POST /api/studio/generate`
+需登录。**限流：20 次/小时/用户 + 40 次/小时/IP**（生图消耗上游额度）。请求体（与生图台面板同构）：
+
+| 字段 | 说明 |
+|---|---|
+| `call_format` | `direct`（sta1n GET）/ `openai`（OpenAI 兼容 `/v1/images/*`） |
+| `nai_prompt` / `nl_prompt` | NAI 标签 / 自然语言（不转译，服务端合并） |
+| `style` / `custom_artists` | 画师串预设 key（vertical/comicDoujin/r18/lolita25d/anime/galgame/custom）；服务端合并进 prompt（direct 链路走独立 `artist` 参数） |
+| `size` | direct：NAI 分档名（竖图…4K横图）；openai NAI：`WxH`（64 倍数/边≤1920/面积≤3686400，4K 自动降 2K）；gpt-image：自动映射到官方枚举/auto |
+| `negative` | 负面词（direct / openai NAI 有效；gpt-image 忽略） |
+| `model` / `n` | 模型；张数 1-6 |
+| `steps`(1-50) / `scale`(0-10) / `sampler` / `noise_schedule` / `seed`(≥0 才发) | NAI 高级参数；**direct 链路额外支持 `cfg`**（CFG Rescale），openai NAI 不发送 cfg |
+| `reference_mode` / `reference_image_b64_list` / `reference_strengths` / `director_captions` | OpenAI NAI 参考图（≤8 张 data URI）：vibe / img2img / director |
+| `strength` / `noise` | img2img 重绘强度 / 附加噪声（0-1） |
+| `director_action` | director-tools 图片处理（bg-removal/lineart/sketch/colorize/emotion/declutter，需源图） |
+| `characters` | 多角色坐标 `[{prompt,x,y}]`（≤6，仅 NAI） |
+| `quality` / `background` / `output_format` | **gpt-image 专属**：low/medium/high/auto、transparent/opaque/auto、png/jpeg/webp |
+
+响应：
+- `200` `{ "ok": true, "data": [{ "b64_json": "...", "ext": "png" }], "merge_info": { "nai_prompt", "nl_prompt", "artists", "full_prompt" }, "meta": { "backend", "kind": "nai"|"gptimage", "model", "size", "n", "elapsed_ms", "user" } }`
+- `400` 参数缺失（如 director-tools 无源图）；`429` 限流；`502` 上游错误（`error` 已翻译）；`504` 超时（上游可能仍在生成，不自动重试）
 
 ---
 
@@ -184,6 +253,11 @@ Query 参数：
 
 | 日期 | 变更 | 影响 |
 |---|---|---|
+| 2026-09-14 | 新增生图台接口：`GET/POST /api/studio/config`、`POST /api/studio/generate`（NAI 直连 + OpenAI 兼容 NAI 全系 + gpt-image） | 面板调用；限流 20 次/时/用户、40 次/时/IP |
+| 2026-09-14 | 文档修正：`GET /api/works/[id]` 响应不含 `user_liked`/`user_bookmarked`（此前示例多写了这两个字段，代码从未返回） | 仅文档修正，代码无变化 |
+| 2026-09-09 | 新增 `POST /api/me/password`（修改密码）与 `GET/POST /api/me/pref`（R18G 屏蔽偏好） | 外部脚本可自助改密/管理偏好 |
+| 2026-09-09 | `GET /api/works`：登录用户开启 R18G 屏蔽时，服务端自动按其偏好过滤结果 | 同一凭证下列表结果可能少于全量 |
+| 2026-09-08 | 新增 `GET /api/images/preview/[name]`（1400px WebP 预览档，详情页用） | 不影响既有调用 |
 | 2026-09-08 | 上传接口：加入限流（60 次/时/用户、120 次/时/IP）与 `meta_i` ≤1MB 限制 | 正常频次无感；超限返回 429 |
 | 2026-09-08 | `GET /api/works` 需登录（未登录 401） | **外部未带凭证的列表抓取会失败**；调用方需加 `Authorization: Bearer <token>` 或 session |
 | 2026-09-08 | 注册密码下限 4 → 8 位 | 新注册用户需 ≥8 位密码；存量用户不受影响 |

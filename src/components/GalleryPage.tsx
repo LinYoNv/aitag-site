@@ -134,6 +134,12 @@ export default function GalleryPage({ user }: { user: UserInfo }) {
           </select>
         </div>
         <a
+          href="/studio"
+          className="bg-[#151922] border border-[#262b36] text-[#e6edf3] text-sm max-sm:text-xs px-3 sm:px-4 py-1.5 rounded-lg hover:border-[#d9c700] hover:text-[#d9c700] whitespace-nowrap"
+        >
+          🎨 生图台
+        </a>
+        <a
           href="/upload"
           className="bg-[#151922] border border-[#262b36] text-[#e6edf3] text-sm max-sm:text-xs px-3 sm:px-4 py-1.5 rounded-lg hover:border-[#4c9fff] whitespace-nowrap"
         >
