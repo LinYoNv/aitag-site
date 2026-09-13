@@ -35,18 +35,81 @@ function trimUrl(v: unknown): string {
   return /^https?:\/\/.+$/.test(s) ? s : "";
 }
 
-/** 读取当前用户的生图配置（默认 URL + 用户自配密钥） */
+// ---- SSRF 防护：上游地址只允许 https 公网（本机测试可用 AITAG_STUDIO_ALLOW_INSECURE=1 放开 http/内网） ----
+// 生图请求由服务器发出且用户可自定义 base_url，若不限制则任意登录用户都能让服务器
+// 请求内网（127.0.0.1 的内部端口、169.254.169.254 元数据、内网段），并通过错误
+// 文案/图片响应读回结果——线上实测已复现（http_404 指纹扫内网端口）。
+
+function isPrivateHost(host: string): boolean {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, "");
+  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local") || h.endsWith(".internal")) {
+    return true;
+  }
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (v4) {
+    const a = Number(v4[1]);
+    const b = Number(v4[2]);
+    if (a === 0 || a === 127 || a === 10) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 169 && b === 254) return true; // link-local / 云元数据
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+    if (a >= 224) return true; // 组播/保留
+    return false;
+  }
+  if (h.includes(":")) {
+    // IPv6 字面量
+    if (h === "::1" || h === "::" || h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80")) return true;
+    const v4mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(h);
+    if (v4mapped) return isPrivateHost(v4mapped[1]);
+    return false;
+  }
+  return false;
+}
+
+/** 校验上游 base_url：必须 https（测试环境可放开）且主机不是内网/环回地址 */
+export function assertSafeUpstreamBase(url: string): void {
+  // 测试模式（AITAG_STUDIO_ALLOW_INSECURE=1）：放开 https 与内网限制，仅供本地
+  // mock 联调；生产绝不设置。
+  if (process.env.AITAG_STUDIO_ALLOW_INSECURE === "1") return;
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    throw new StudioError("upstream_blocked", "上游地址格式无效");
+  }
+  if (u.protocol !== "https:") {
+    throw new StudioError("upstream_blocked", "上游地址必须使用 https://");
+  }
+  if (isPrivateHost(u.hostname)) {
+    throw new StudioError("upstream_blocked", "上游地址不允许指向内网/本机地址");
+  }
+}
+
+/** 用户提交的 base_url 是否允许使用（不合法一律回退站点默认） */
+function safeUserBaseUrl(v: unknown): string | undefined {
+  const s = trimUrl(v);
+  if (!s) return undefined;
+  try {
+    assertSafeUpstreamBase(s);
+    return s;
+  } catch {
+    return undefined;
+  }
+}
+
+/** 读取当前用户的生图配置（默认 URL + 用户自配密钥），读取侧再做一次 SSRF 校验 */
 export function resolveUserStudio(userId: string): ResolvedStudioCfg {
   const cfg = getUserStudioCfg(userId) as UserStudioCfg;
   const o = cfg.openai ?? {};
   const d = cfg.direct ?? {};
   const openai = {
-    base_url: trimUrl(o.base_url) || DEFAULT_OPENAI_BASE_URL,
+    base_url: safeUserBaseUrl(o.base_url) ?? DEFAULT_OPENAI_BASE_URL,
     api_key: typeof o.api_key === "string" ? o.api_key.trim() : "",
     configured: Boolean(o.api_key && String(o.api_key).trim()),
   };
   const direct = {
-    base_url: trimUrl(d.base_url) || DEFAULT_DIRECT_BASE_URL,
+    base_url: safeUserBaseUrl(d.base_url) ?? DEFAULT_DIRECT_BASE_URL,
     token: typeof d.token === "string" ? d.token.trim() : "",
     configured: Boolean(d.token && String(d.token).trim()),
   };
@@ -74,9 +137,8 @@ export function updateUserStudio(
     direct: { ...(current.direct ?? {}) },
   };
   if (patch.openai) {
-    const url = trimUrl(patch.openai.base_url);
     if (patch.openai.base_url !== undefined) {
-      next.openai = { ...(next.openai ?? {}), base_url: url || undefined };
+      next.openai = { ...(next.openai ?? {}), base_url: safeUserBaseUrl(patch.openai.base_url) };
     }
     if (patch.openai.clear_api_key) {
       next.openai = { ...(next.openai ?? {}), api_key: undefined };
@@ -86,9 +148,8 @@ export function updateUserStudio(
     }
   }
   if (patch.direct) {
-    const url = trimUrl(patch.direct.base_url);
     if (patch.direct.base_url !== undefined) {
-      next.direct = { ...(next.direct ?? {}), base_url: url || undefined };
+      next.direct = { ...(next.direct ?? {}), base_url: safeUserBaseUrl(patch.direct.base_url) };
     }
     if (patch.direct.clear_token) {
       next.direct = { ...(next.direct ?? {}), token: undefined };
@@ -158,10 +219,10 @@ const RETRYABLE_STATUS = new Set([408, 429, 502, 503, 504]);
 const RETRY_DELAYS = [2_000, 4_000, 8_000];
 
 export function formatGenerateError(reason: string): string {
-  if (reason.startsWith("http_")) {
-    const [, code, ...rest] = reason.split(/[:|]/);
-    const detail = rest.join(" ").trim();
-    return `上游接口返回 HTTP ${code}${detail ? `：${detail}` : ""}`;
+  const httpMatch = /^http_(\d+)(?:[|:]([\s\S]*))?$/.exec(reason);
+  if (httpMatch) {
+    const detail = (httpMatch[2] ?? "").trim();
+    return `上游接口返回 HTTP ${httpMatch[1]}${detail ? `：${detail}` : ""}`;
   }
   const map: Record<string, string> = {
     openai_not_configured: "站点未配置 OpenAI 兼容生图接口，请联系管理员在生图台后台填写。",
@@ -285,7 +346,13 @@ async function readResponseImages(text: string): Promise<Buffer[]> {
       continue;
     }
     const url = (rec.url ?? "").trim();
-    if (url) {
+    if (url && /^https?:\/\//i.test(url)) {
+      // 上游返回的下载地址也做 SSRF 校验（防恶意上游借我们服务器探内网）
+      try {
+        assertSafeUpstreamBase(url);
+      } catch {
+        continue;
+      }
       const dl = await fetch(url, { signal: AbortSignal.timeout(60_000) });
       if (dl.ok) images.push(Buffer.from(await dl.arrayBuffer()));
     }
@@ -494,6 +561,7 @@ export async function generateNaiOpenAi(cfg: ResolvedStudioCfg["openai"], input:
     };
   }
 
+  assertSafeUpstreamBase(cfg.base_url);
   const base = cfg.base_url.replace(/\/+$/, "");
   let endpoint: string;
   if (/\/images\/(generations|edits)$/.test(base)) {
@@ -535,6 +603,7 @@ export async function generateGptImage(cfg: ResolvedStudioCfg["openai"], input: 
   const background = ["transparent", "opaque", "auto"].includes(input.background ?? "") ? input.background : undefined;
   const outputFormat = ["png", "jpeg", "webp"].includes(input.output_format ?? "") ? input.output_format : undefined;
 
+  assertSafeUpstreamBase(cfg.base_url);
   const base = cfg.base_url.replace(/\/+$/, "");
   const buildEndpoint = (target: "generations" | "edits"): string => {
     if (/\/images\/(generations|edits)$/.test(base)) {
@@ -622,6 +691,7 @@ export interface DirectInput {
 
 export async function generateDirect(cfg: ResolvedStudioCfg["direct"], input: DirectInput): Promise<Buffer[]> {
   if (!cfg.token) throw new StudioError("direct_not_configured");
+  assertSafeUpstreamBase(cfg.base_url);
   const base = cfg.base_url.replace(/\/+$/, "");
   const url =
     `${base}/generate` +
@@ -659,6 +729,7 @@ export async function checkDirectToken(
 ): Promise<{ ok: boolean; message: string }> {
   if (!cfg.token) return { ok: false, message: "未配置 Token" };
   try {
+    assertSafeUpstreamBase(cfg.base_url);
     const base = cfg.base_url.replace(/\/+$/, "");
     const resp = await fetch(`${base}/api/api/getUser`, {
       method: "POST",

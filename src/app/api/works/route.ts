@@ -33,11 +33,21 @@ export async function GET(req: NextRequest) {
       : defaultHiddenTags();
   }
 
+  // 画廊「屏蔽 tag」黑名单（搜索框旁输入，逗号分隔）：上限 20 词 ×40 字符，
+  // 防止拼出海量 has_pos_tag 调用拖垮列表查询
+  const blockTagsParam = sp.get("block_tags") ?? "";
+  const blockTags = blockTagsParam
+    .split(",")
+    .map((t) => t.trim().slice(0, 40))
+    .filter(Boolean)
+    .slice(0, 20);
+
   const result = listWorks({
     q: q || undefined,
     prompt: prompt || undefined,
     sort,
     ai_type: aiType || undefined,
+    block_tags: blockTags.length ? blockTags.join(",") : undefined,
     blocked_pos_tags: blockedPosTags,
     page: Number.isFinite(page) ? page : 1,
     page_size: Number.isFinite(page_size) ? page_size : 24,

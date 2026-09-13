@@ -79,6 +79,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // 请求体上限：8 张参考图的 data URI 是主要体积来源，超限直接拒绝防内存打爆
+  const contentLength = Number(req.headers.get("content-length") ?? 0);
+  if (contentLength > 96 * 1024 * 1024) {
+    return NextResponse.json({ error: "请求体过大（参考图总量超限）" }, { status: 413 });
+  }
+
   let body: GenerateBody;
   try {
     body = (await req.json()) as GenerateBody;
@@ -87,11 +93,15 @@ export async function POST(req: NextRequest) {
   }
 
   const backend = body.call_format === "direct" ? "direct" : "openai";
-  const naiPrompt = String(body.nai_prompt ?? "").trim();
-  const nlPrompt = String(body.nl_prompt ?? "").trim();
+  const naiPrompt = String(body.nai_prompt ?? "").trim().slice(0, 8000);
+  const nlPrompt = String(body.nl_prompt ?? "").trim().slice(0, 8000);
+  const negative = String(body.negative ?? "").trim().slice(0, 4000);
   const directorAction = String(body.director_action ?? "").trim();
   const refList = Array.isArray(body.reference_image_b64_list)
-    ? body.reference_image_b64_list.filter((s) => typeof s === "string" && s.startsWith("data:"))
+    ? body.reference_image_b64_list
+        .filter((s) => typeof s === "string" && s.startsWith("data:"))
+        // 单张 data URI ≤ 11MB 字符（约 8MB 二进制），防单请求占满内存
+        .filter((s) => s.length <= 11_000_000)
     : [];
 
   if (backend === "openai") {
@@ -148,7 +158,7 @@ export async function POST(req: NextRequest) {
       images = await generateDirect(cfg.direct, {
         full_prompt: fullPrompt,
         artists: merged.artists,
-        negative: body.negative,
+        negative,
         // 直连接口吃 NAI 分档名（竖图/2K竖图/...）；客户端若传了 WxH（OpenAI
         // 风格），反查映射表还原为分档名
         size: reverseNaiSize(actualSize),
@@ -194,7 +204,7 @@ export async function POST(req: NextRequest) {
       }
       images = await generateNaiOpenAi(cfg.openai, {
         full_prompt: fullPrompt,
-        negative: body.negative,
+        negative,
         size: actualSize,
         n,
         model: model || undefined,

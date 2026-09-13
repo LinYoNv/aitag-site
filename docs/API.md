@@ -72,6 +72,7 @@
 - `GET` → `200` `{ "ok": true, "config": { "openai": { "configured": bool, "base_url": "..." }, "direct": { "configured": bool, "base_url": "..." } } }`（**密钥/Token 绝不回显**）
 - `POST` 请求：`{ "openai": { "base_url"?, "api_key"?, "clear_api_key"? }, "direct": { "base_url"?, "token"?, "clear_token"? }, "probe_direct"? }`
   - 密钥/Token 留空 = 保持不变；`clear_api_key`/`clear_token: true` = 清除；`base_url` 留空 = 回退站点默认
+  - **base_url 仅接受 `https://` 公网地址**（SSRF 防护：内网/环回/链路本地/非 https 一律忽略并回退站点默认）
   - `probe_direct: true` → 顺带测试 sta1n Token（响应体 `status:"error"` 视为无效）
   - → `200` `{ "ok": true, "config": {...}, "probe": { "ok": bool, "message": "..." } | null }`
 - `DELETE /api/me/studio?target=openai_key|direct_token` → `200` `{ "ok": true, "config": {...} }`
@@ -231,7 +232,7 @@ Query 参数：
 
 响应：
 - `200` `{ "ok": true, "data": [{ "b64_json": "...", "ext": "png" }], "merge_info": { "nai_prompt", "nl_prompt", "artists", "full_prompt" }, "meta": { "backend", "kind": "nai"|"gptimage", "model", "size", "n", "elapsed_ms", "user" } }`
-- `400` 参数缺失（如 director-tools 无源图）或**用户未配置对应后端密钥**（reason 为 `key_not_configured`，文案引导到个人资料设置）；`429` 限流；`502` 上游错误（`error` 已翻译）；`504` 超时（上游可能仍在生成，不自动重试）
+- `400` 参数缺失（如 director-tools 无源图）或**用户未配置对应后端密钥**（reason 为 `key_not_configured`，文案引导到个人资料设置）；`413` 请求体过大（参考图总量 >96MB / 单张 data URI >11MB 被忽略）；`429` 限流；`502` 上游错误（`error` 已翻译，含 `upstream_blocked` = 上游地址未通过 SSRF 校验）；`504` 超时（上游可能仍在生成，不自动重试）。prompt/negative 服务端截断（8000/4000 字符）
 
 ---
 
@@ -258,6 +259,7 @@ Query 参数：
 
 | 日期 | 变更 | 影响 |
 |---|---|---|
+| 2026-09-14 | 生图台安全加固：base_url 强制 https 公网（SSRF 防护）；studio_cfg 落盘 AES-256-GCM 加密；prompt/参考图/请求体上限；`/api/works?block_tags` 恢复生效（≤20 词）；R18G 自定义词 ≤50 | 合法使用无感；内网上游地址被拒 |
 | 2026-09-14 | 注册：用户名唯一性改大小写不敏感（unique 索引重建）+ 系统保留名黑名单 | 与既有用户仅大小写不同的用户名无法再注册；登录不区分大小写 |
 | 2026-09-14 | 生图台密钥改为**用户自配**：新增 `/api/me/studio`（GET/POST/DELETE）；`/api/studio/config` 改为当前用户状态快照（移除管理员 POST）；生成时按用户密钥调用上游 | 未配置密钥的用户生图返回 400 引导配置；消耗各自的额度 |
 | 2026-09-14 | 新增生图台接口：`GET/POST /api/studio/config`、`POST /api/studio/generate`（NAI 直连 + OpenAI 兼容 NAI 全系 + gpt-image） | 面板调用；限流 20 次/时/用户、40 次/时/IP |

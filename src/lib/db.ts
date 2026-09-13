@@ -573,6 +573,61 @@ export function setUserPref(userId: string, pref: R18GPref): void {
 
 // ---- 用户生图台密钥（OpenAI 兼容 key + sta1n 直连 token，个人自配） ----
 
+// 落盘加密（AES-256-GCM）：防止数据库文件单独泄漏（备份误传/目录暴露）时明文密钥被拖走。
+// 密钥来源：环境变量 AITAG_STUDIO_SECRET（≥32 字符，推荐生产用）优先，
+// 否则首次自动生成 data/studio.secret（0600，/data/ 已 gitignore）。
+// 密文格式 "enc:v1:<iv>:<tag>:<data>"（均 base64）；旧明文兼容读取，下次保存自动转密文。
+let studioSecretCache: Buffer | null | undefined;
+
+function getStudioSecret(): Buffer | null {
+  if (studioSecretCache !== undefined) return studioSecretCache;
+  const env = process.env.AITAG_STUDIO_SECRET;
+  if (env && env.length >= 32) {
+    studioSecretCache = crypto.createHash("sha256").update(env).digest();
+    return studioSecretCache;
+  }
+  const secretPath = path.join(DATA_DIR, "studio.secret");
+  try {
+    const raw = fs.readFileSync(secretPath, "utf8").trim();
+    if (/^[0-9a-f]{64}$/.test(raw)) {
+      studioSecretCache = Buffer.from(raw, "hex");
+      return studioSecretCache;
+    }
+  } catch {
+    // 首次：文件不存在
+  }
+  const generated = crypto.randomBytes(32).toString("hex");
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(secretPath, generated + "\n", { mode: 0o600 });
+  studioSecretCache = Buffer.from(generated, "hex");
+  return studioSecretCache;
+}
+
+function encryptStudioCfg(plain: string): string {
+  const key = getStudioSecret();
+  if (!key) return plain;
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const enc = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `enc:v1:${iv.toString("base64")}:${tag.toString("base64")}:${enc.toString("base64")}`;
+}
+
+function decryptStudioCfg(stored: string): string {
+  if (!stored.startsWith("enc:v1:")) return stored;
+  try {
+    const [ivB64, tagB64, dataB64] = stored.slice("enc:v1:".length).split(":");
+    const key = getStudioSecret();
+    if (!key) return "";
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(ivB64, "base64"));
+    decipher.setAuthTag(Buffer.from(tagB64, "base64"));
+    return Buffer.concat([decipher.update(Buffer.from(dataB64, "base64")), decipher.final()]).toString("utf8");
+  } catch {
+    // 密钥不匹配/密文损坏 → 视作未配置（用户重新保存即可）
+    return "";
+  }
+}
+
 export interface UserStudioCfg {
   openai?: { base_url?: string; api_key?: string };
   direct?: { base_url?: string; token?: string };
@@ -585,7 +640,7 @@ export function getUserStudioCfg(userId: string): UserStudioCfg {
     | undefined;
   if (!row?.studio_cfg) return {};
   try {
-    const parsed = JSON.parse(row.studio_cfg) as UserStudioCfg;
+    const parsed = JSON.parse(decryptStudioCfg(row.studio_cfg)) as UserStudioCfg;
     if (!parsed || typeof parsed !== "object") return {};
     return parsed;
   } catch {
@@ -596,7 +651,7 @@ export function getUserStudioCfg(userId: string): UserStudioCfg {
 export function setUserStudioCfg(userId: string, cfg: UserStudioCfg): void {
   const d = getDb();
   d.prepare(`UPDATE users SET studio_cfg = ? WHERE id = ?`).run(
-    JSON.stringify(cfg),
+    encryptStudioCfg(JSON.stringify(cfg)),
     userId,
   );
 }
