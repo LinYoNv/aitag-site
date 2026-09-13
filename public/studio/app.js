@@ -79,17 +79,6 @@
     cfgField: $("cfgField"),
     noiseScheduleField: $("noiseScheduleField"),
     styleCard: $("styleCard"),
-    // 管理员配置
-    adminCard: $("adminCard"),
-    admOpenaiBaseUrl: $("admOpenaiBaseUrl"),
-    admOpenaiApiKey: $("admOpenaiApiKey"),
-    admOpenaiModel: $("admOpenaiModel"),
-    admDirectBaseUrl: $("admDirectBaseUrl"),
-    admDirectToken: $("admDirectToken"),
-    admDirectModel: $("admDirectModel"),
-    admSave: $("admSave"),
-    admProbe: $("admProbe"),
-    admSaveMsg: $("admSaveMsg"),
   };
 
   // ===== 状态 =====
@@ -146,6 +135,14 @@
     if (!el) return;
     el.textContent = text;
     el.className = "badge " + (type || "badge-neutral");
+  }
+
+  // 徽章点击：未配置时引导去个人资料设置（顶层窗口跳转）
+  function bindBadgeConfigShortcut(el, getConfigured) {
+    if (!el) return;
+    el.addEventListener("click", () => {
+      if (!getConfigured()) goProfile();
+    });
   }
 
   function isGptModel(name) {
@@ -458,24 +455,31 @@
     }
   }
 
-  // ===== 加载配置状态 =====
+  // ===== 加载配置状态（当前用户自己的密钥，脱敏） =====
   let panelConfig = null;
+
+  function goProfile() {
+    // iframe 场景需要跳顶层窗口
+    try {
+      window.top.location.href = "/profile";
+    } catch (e) {
+      window.location.href = "/profile";
+    }
+  }
 
   async function loadTokenStatus() {
     try {
       const resp = await apiGet("/api/studio/config");
       const config = resp.config || {};
       panelConfig = resp;
-      if (config.direct && config.direct.configured) {
-        setBadge(els.tokenBadge, "直连: 已配置", "badge-success");
-      } else {
-        setBadge(els.tokenBadge, "直连: 未配置", "badge-error");
-      }
-      if (config.openai && config.openai.configured) {
-        setBadge(els.openaiBadge, "OpenAI: 已配置", "badge-success");
-      } else {
-        setBadge(els.openaiBadge, "OpenAI: 未配置", "badge-error");
-      }
+      const directOk = Boolean(config.direct && config.direct.configured);
+      const openaiOk = Boolean(config.openai && config.openai.configured);
+      setBadge(els.tokenBadge, directOk ? "直连: 已配置" : "直连: 未配置", directOk ? "badge-success" : "badge-error");
+      setBadge(els.openaiBadge, openaiOk ? "OpenAI: 已配置" : "OpenAI: 未配置", openaiOk ? "badge-success" : "badge-error");
+      bindBadgeConfigShortcut(els.tokenBadge, () => Boolean(panelConfig?.config?.direct?.configured));
+      bindBadgeConfigShortcut(els.openaiBadge, () => Boolean(panelConfig?.config?.openai?.configured));
+      if (els.tokenBadge) els.tokenBadge.style.cursor = directOk ? "" : "pointer";
+      if (els.openaiBadge) els.openaiBadge.style.cursor = openaiOk ? "" : "pointer";
       if (Array.isArray(resp.openai_models) && resp.openai_models.length) {
         openaiModels = resp.openai_models;
       }
@@ -499,25 +503,17 @@
           els.openaiConfigStatusText.textContent =
             "OpenAI 接口已配置：" + (config.openai.base_url || "");
           els.openaiConfigStatus.querySelector(".status-dot").className = "status-dot ok";
+          const go = $("goProfileBtn");
+          if (go) hide(go);
         } else {
           els.openaiConfigStatusText.textContent =
-            "OpenAI 接口未配置：请联系管理员在生图台后台填写接口地址与密钥";
+            "你还未配置 OpenAI 兼容密钥（消耗你自己的额度）";
           els.openaiConfigStatus.querySelector(".status-dot").className = "status-dot error";
+          const go = $("goProfileBtn");
+          if (go) show(go);
         }
       } else if (els.openaiConfigStatus) {
         hide(els.openaiConfigStatus);
-      }
-      // 管理员配置卡
-      if (resp.viewer_is_admin && els.adminCard) {
-        show(els.adminCard);
-        if (config.openai) {
-          if (els.admOpenaiBaseUrl) els.admOpenaiBaseUrl.value = config.openai.base_url || "";
-          if (els.admOpenaiModel) els.admOpenaiModel.value = config.openai.default_model || "";
-        }
-        if (config.direct) {
-          if (els.admDirectBaseUrl) els.admDirectBaseUrl.value = config.direct.base_url || "";
-          if (els.admDirectModel) els.admDirectModel.value = config.direct.default_model || "";
-        }
       }
     } catch (err) {
       setBadge(els.tokenBadge, "配置加载失败", "badge-error");
@@ -1427,61 +1423,6 @@
     return els.negative.value;
   }
 
-  // ===== 管理员：保存后端配置 / 测试直连 Token =====
-  async function adminSave() {
-    if (!els.admSaveMsg) return;
-    els.admSaveMsg.textContent = "保存中...";
-    try {
-      const payload = {
-        openai: {
-          base_url: els.admOpenaiBaseUrl ? els.admOpenaiBaseUrl.value.trim() : "",
-          // 密钥留空 = 保持不变（后端逻辑：空字符串不覆盖已有值）
-          api_key: els.admOpenaiApiKey ? els.admOpenaiApiKey.value.trim() : "",
-          default_model: els.admOpenaiModel ? els.admOpenaiModel.value.trim() : "",
-        },
-        direct: {
-          base_url: els.admDirectBaseUrl ? els.admDirectBaseUrl.value.trim() : "",
-          token: els.admDirectToken ? els.admDirectToken.value.trim() : "",
-          default_model: els.admDirectModel ? els.admDirectModel.value.trim() : "",
-        },
-      };
-      const resp = await apiPost("/api/studio/config", payload);
-      els.admSaveMsg.textContent = "✓ 已保存";
-      if (els.admOpenaiApiKey) els.admOpenaiApiKey.value = "";
-      if (els.admDirectToken) els.admDirectToken.value = "";
-      panelConfig = resp;
-      const config = resp.config || {};
-      setBadge(els.tokenBadge, config.direct && config.direct.configured ? "直连: 已配置" : "直连: 未配置",
-        config.direct && config.direct.configured ? "badge-success" : "badge-error");
-      setBadge(els.openaiBadge, config.openai && config.openai.configured ? "OpenAI: 已配置" : "OpenAI: 未配置",
-        config.openai && config.openai.configured ? "badge-success" : "badge-error");
-    } catch (err) {
-      els.admSaveMsg.textContent = `✕ ${err?.message || err}`;
-    }
-    setTimeout(() => { if (els.admSaveMsg) els.admSaveMsg.textContent = ""; }, 4000);
-  }
-
-  async function adminProbe() {
-    if (!els.admSaveMsg) return;
-    els.admSaveMsg.textContent = "测试中...";
-    try {
-      const payload = {
-        direct: {
-          base_url: els.admDirectBaseUrl ? els.admDirectBaseUrl.value.trim() : "",
-          token: els.admDirectToken ? els.admDirectToken.value.trim() : "",
-          default_model: els.admDirectModel ? els.admDirectModel.value.trim() : "",
-        },
-        probe_direct: true,
-      };
-      const resp = await apiPost("/api/studio/config", payload);
-      const probe = resp.probe;
-      els.admSaveMsg.textContent = probe && probe.ok ? "✓ Token 有效" : `✕ ${probe ? probe.message : "测试失败"}`;
-    } catch (err) {
-      els.admSaveMsg.textContent = `✕ ${err?.message || err}`;
-    }
-    setTimeout(() => { if (els.admSaveMsg) els.admSaveMsg.textContent = ""; }, 6000);
-  }
-
   // ===== 事件绑定 =====
   function bindEvents() {
     els.model.addEventListener("change", () => {
@@ -1515,8 +1456,8 @@
       }
     });
     els.loadDefaultNegative.addEventListener("click", loadDefaultNegative);
-    if (els.admSave) els.admSave.addEventListener("click", adminSave);
-    if (els.admProbe) els.admProbe.addEventListener("click", adminProbe);
+    const goBtn = $("goProfileBtn");
+    if (goBtn) goBtn.addEventListener("click", goProfile);
 
     // 所有表单字段变更时自动缓存
     getCachedFields().forEach((key) => {

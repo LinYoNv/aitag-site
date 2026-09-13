@@ -70,7 +70,7 @@ systemctl reload caddy          # 改 Caddyfile 后重载
 | 用户主页 | 参照 Pixiv：头像/用户名/管理员徽章/注册时间资料卡 + 统计行（作品/点赞/收藏/浏览）+ **作品\|收藏 Tab 滑块** | `/u/[username]` |
 | API Token | 账号绑定凭证，供外部插件走接口上传鉴权；明文只显示一次，库里存 SHA-256 哈希；可重新生成（旧的立即失效） | `/profile` |
 | R18G 屏蔽 | 用户级内容屏蔽：分组中英对照勾选（粪便/排尿/兽人/血腥/吞噬）+ 自定义词，只匹配**正向 prompt 词边界**；画廊与用户主页列表均生效 | `/profile` |
-| 生图台 | 在线生图：NAI 直连（nai.sta1n.cn GET）+ OpenAI 兼容（syuan `/v1/images/*`，NAI 全系 + gpt-image）；参考图（vibe/精准/img2img）、director-tools、多角色坐标、风格画师串预设、结果下载/传图库；UI 移植自 nai_image test-panel | `/studio` |
+| 生图台 | 在线生图：NAI 直连（nai.sta1n.cn GET）+ OpenAI 兼容（syuan `/v1/images/*`，NAI 全系 + gpt-image）；**密钥用户自配**（个人资料设置，站点只提供默认 URL）；参考图（vibe/精准/img2img）、director-tools、多角色坐标、风格画师串预设、结果下载/传图库；UI 移植自 nai_image test-panel | `/studio` |
 | 站点配置 | `/api/config` 返回站点名、语言、上传开关 | API |
 | 画师解析 | NovelAI 新旧格式、数值权重、花括号强调、**NAI v4/v5 加权画师串**、风格词黑名单过滤；uc 纯画师列表自动按「排除画师」呈现 | 详情页 |
 | 解析健壮性 (A1) | 文本 chunk 上限 4MB / ComfyUI 节点上限 2048 / 递归深度上限 100——畸形 PNG 不崩接口 | `src/lib/png.ts` |
@@ -106,8 +106,10 @@ systemctl reload caddy          # 改 Caddyfile 后重载
 | POST | `/api/me/password` | 登录 | JSON `{old_password, new_password}` | 200 `{ok:true}`；403 旧密码错误；400 新密码<8 位或与旧密码相同 |
 | GET | `/api/me/pref` | 登录 | — | 200 `{ok,pref:{enabled,selected,custom}}`（R18G 屏蔽偏好） |
 | POST | `/api/me/pref` | 登录 | JSON `{pref}`；selected 仅接受词表 tag 英文名，custom 每词 ≤40 字符 | 200 `{ok,pref}`（返回保存后的完整偏好） |
-| GET | `/api/studio/config` | 登录 | — | 200 配置快照（脱敏）+ 模型列表 + `viewer_is_admin`；**绝不含完整密钥** |
-| POST | `/api/studio/config` | admin | JSON `{openai?,direct?,probe_direct?}`；密钥留空 = 保持不变 | 200 `{ok,config,probe?}`；403 非管理员 |
+| GET | `/api/studio/config` | 登录 | — | 200 当前用户密钥状态（脱敏）+ 默认 URL + 模型列表；**绝不含完整密钥** |
+| GET | `/api/me/studio` | 登录 | — | 200 `{ok,config:{openai:{configured,base_url},direct:{...}}}`（个人生图密钥状态） |
+| POST | `/api/me/studio` | 登录 | JSON `{openai:{base_url?,api_key?,clear_api_key?},direct:{base_url?,token?,clear_token?},probe_direct?}`；密钥留空=不变，clear=清除，URL 留空=回退默认 | 200 `{ok,config,probe?}` |
+| DELETE | `/api/me/studio?target=openai_key\|direct_token` | 登录 | — | 200 `{ok,config}`（清除对应密钥） |
 | POST | `/api/studio/generate` | 登录 | JSON `{call_format:"direct"\|"openai", nai_prompt, nl_prompt?, style?, custom_artists?, negative?, size, model?, n?, steps?, scale?, cfg?, sampler?, noise_schedule?, seed?, reference_mode?, reference_image_b64_list?, reference_strengths?, director_action?, characters?, quality?, background?, output_format?}` | 200 `{ok,data:[{b64_json,ext}],merge_info,meta}`（限流 20 次/时/用户 + 40 次/时/IP）；429/502/504 |
 
 `user` 序列化（`safeUser`）字段：`id, username, role("admin"|"user"), author_name, avatar, create_date`（**不含密码哈希**）。
@@ -198,6 +200,7 @@ systemctl reload caddy          # 改 Caddyfile 后重载
 | avatar | TEXT | 头像 URL（`/api/avatars/...`，空=默认图标） |
 | create_date | TEXT | ISO |
 | api_token_hash | TEXT | API Token 的 SHA-256 哈希（**不存明文**；空=未生成） |
+| studio_cfg | TEXT(JSON) | 生图台个人密钥 `{openai:{base_url,api_key},direct:{base_url,token}}`（**含明文密钥**——服务端调上游需要；任何接口都不回显） |
 | r18g_pref | TEXT(JSON) | R18G 屏蔽偏好 `{enabled, selected[], custom[]}`（`getUserPref` 容错解析，损坏/缺字段回退默认） |
 
 ### user_actions（点赞/收藏记录）
@@ -338,7 +341,7 @@ systemctl reload caddy          # 改 Caddyfile 后重载
 25. **生图台（2026-09-14）**：`/studio`（requireLogin）全屏内嵌 `public/studio/` 静态面板（index.html + app.css + app.js，UI 移植自 nai_image test-panel 并保持其 ENDFIELD 视觉）。后端 `src/lib/studio.ts` 双上游：
     - **direct**（nai.sta1n.cn）：`GET /generate?tag&token&model&artist&size&steps&scale&cfg&sampler&negative&nocache=1&noise_schedule`，响应=图片字节；画师串走独立 `artist` 参数；**cfg 仅此链路发送**。
     - **openai**（api.syuan.org 等）：NAI 模型按 nai_image 契约——`/v1/images/generations` 顶层 `prompt/size/n/model/action` + `parameters{steps,scale,sampler,noise_schedule,seed,negative_prompt,reference_image_multiple,reference_strength_multiple,director_reference_*,use_coords,characterPrompts,v4_prompt}`，img2img 走 `/v1/images/edits`；尺寸契约 64 倍数/最大边 1920/面积 3686400（4K 档降级 2K）；参考图 ≤8 张，img2img 用 sharp 精确 cover 到目标尺寸、vibe/director 等比缩限；重试 408/429/502/503/504 + "稍后重试"类文案（2/4/8s 退避），超时不重试。gpt-image 模型（`gpt-image-*`）自动切换官方参数面：`quality/background/output_format`，参考图走 `/v1/images/edits` multipart `image[]`，NAI 参数自动忽略。
-    - **密钥管理**：`data/studio.json`（chmod 600，/data/ 已 gitignore）；环境变量优先：`AITAG_STUDIO_OPENAI_BASE_URL/_API_KEY/_MODEL`、`AITAG_STUDIO_DIRECT_BASE_URL/_TOKEN/_MODEL`。管理员在生图台页内「05 SETP」卡配置（密钥留空=保持不变），可一键测试直连 Token（`POST /api/api/getUser`）。
+    - **密钥用户自配（2026-09-14 起）**：站点只提供默认 URL（`https://api.syuan.org` / `https://nai.sta1n.cn`，可在个人资料设置覆盖），每个用户在「个人资料设置 → 生图台密钥」填自己的 OpenAI Key / sta1n Token，生图消耗各自的额度。密钥明文存 `users.studio_cfg`（服务端调上游必需；`/api/me/studio` 与 `/api/studio/config` 一律不回显，GET 只给 `已配置/未配置` 状态）。未配置时生图返回 400 并引导去个人资料设置；`POST /api/me/studio` 支持 `probe_direct` 测试 sta1n Token（`POST /api/api/getUser`，响应体 `status:"error"` 视为无效）。
     - **结果入库**：结果卡「传到图库」走 `POST /api/upload`（b64→File + `meta_0` 带完整 prompt/参数，gpt-image 用 ai_type=other）。
 
 ---

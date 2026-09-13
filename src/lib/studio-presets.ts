@@ -4,6 +4,13 @@
 //  - nai_image 直连模式        → nai.sta1n.cn /generate（GET）
 //  - image_companion openai 平台 → gpt-image-1 等通用图片模型
 
+// ---- 默认上游（站点只提供地址，密钥由用户在个人资料设置里自配） ----
+
+/** OpenAI 兼容中转站（syuan）默认地址 */
+export const DEFAULT_OPENAI_BASE_URL = "https://api.syuan.org";
+/** NAI 直连（sta1n）默认地址 */
+export const DEFAULT_DIRECT_BASE_URL = "https://nai.sta1n.cn";
+
 // ---- 模型列表 ----
 
 /** OpenAI 兼容端点（syuan）上的 NovelAI 模型（接口文档 §9） */

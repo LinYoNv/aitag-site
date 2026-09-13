@@ -119,6 +119,10 @@ export function getDb(): DatabaseSync {
     if (!cols.some((c) => c.name === "r18g_pref")) {
       db.exec(`ALTER TABLE users ADD COLUMN r18g_pref TEXT NOT NULL DEFAULT '{}'`);
     }
+    // 兼容已存在的 users 表（旧库没有 studio_cfg 列：生图台个人密钥 JSON）
+    if (!cols.some((c) => c.name === "studio_cfg")) {
+      db.exec(`ALTER TABLE users ADD COLUMN studio_cfg TEXT NOT NULL DEFAULT ''`);
+    }
   }
   return db;
 }
@@ -553,6 +557,36 @@ export function setUserPref(userId: string, pref: R18GPref): void {
   const d = getDb();
   d.prepare(`UPDATE users SET r18g_pref = ? WHERE id = ?`).run(
     JSON.stringify(pref),
+    userId,
+  );
+}
+
+// ---- 用户生图台密钥（OpenAI 兼容 key + sta1n 直连 token，个人自配） ----
+
+export interface UserStudioCfg {
+  openai?: { base_url?: string; api_key?: string };
+  direct?: { base_url?: string; token?: string };
+}
+
+export function getUserStudioCfg(userId: string): UserStudioCfg {
+  const d = getDb();
+  const row = d.prepare("SELECT studio_cfg FROM users WHERE id = ?").get(userId) as
+    | { studio_cfg?: string }
+    | undefined;
+  if (!row?.studio_cfg) return {};
+  try {
+    const parsed = JSON.parse(row.studio_cfg) as UserStudioCfg;
+    if (!parsed || typeof parsed !== "object") return {};
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
+export function setUserStudioCfg(userId: string, cfg: UserStudioCfg): void {
+  const d = getDb();
+  d.prepare(`UPDATE users SET studio_cfg = ? WHERE id = ?`).run(
+    JSON.stringify(cfg),
     userId,
   );
 }

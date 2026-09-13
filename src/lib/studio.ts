@@ -8,9 +8,7 @@
 //  - direct 后端（nai.sta1n.cn）：GET /generate，响应为原始图片字节
 
 import "server-only";
-import fs from "node:fs";
-import path from "node:path";
-import crypto from "node:crypto";
+import { getUserStudioCfg, setUserStudioCfg, type UserStudioCfg } from "./db";
 import {
   NAI_SIZE_MAP,
   normalizeOpenAiSize,
@@ -20,125 +18,104 @@ import {
   DEFAULT_DIRECTOR_STRENGTH,
   DEFAULT_DIRECTOR_SECONDARY_STRENGTH,
   DEFAULT_DIRECTOR_CAPTION,
+  DEFAULT_OPENAI_BASE_URL,
+  DEFAULT_DIRECT_BASE_URL,
   STYLE_PRESETS,
 } from "./studio-presets";
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const CONFIG_PATH = path.join(DATA_DIR, "studio.json");
+// ---- 用户级配置（站点只提供默认 URL；密钥由用户在个人资料设置自配，存 users.studio_cfg） ----
 
-// ---- 配置 ----
-
-export interface StudioOpenAiConfig {
-  base_url: string;
-  api_key: string;
-  default_model: string;
-  timeout_seconds: number;
-  max_retries: number;
+export interface ResolvedStudioCfg {
+  openai: { base_url: string; api_key: string; configured: boolean };
+  direct: { base_url: string; token: string; configured: boolean };
 }
 
-export interface StudioDirectConfig {
-  base_url: string;
-  token: string;
-  default_model: string;
-  timeout_seconds: number;
+function trimUrl(v: unknown): string {
+  const s = typeof v === "string" ? v.trim().replace(/\/+$/, "") : "";
+  return /^https?:\/\/.+$/.test(s) ? s : "";
 }
 
-export interface StudioConfig {
-  openai: StudioOpenAiConfig;
-  direct: StudioDirectConfig;
+/** 读取当前用户的生图配置（默认 URL + 用户自配密钥） */
+export function resolveUserStudio(userId: string): ResolvedStudioCfg {
+  const cfg = getUserStudioCfg(userId) as UserStudioCfg;
+  const o = cfg.openai ?? {};
+  const d = cfg.direct ?? {};
+  const openai = {
+    base_url: trimUrl(o.base_url) || DEFAULT_OPENAI_BASE_URL,
+    api_key: typeof o.api_key === "string" ? o.api_key.trim() : "",
+    configured: Boolean(o.api_key && String(o.api_key).trim()),
+  };
+  const direct = {
+    base_url: trimUrl(d.base_url) || DEFAULT_DIRECT_BASE_URL,
+    token: typeof d.token === "string" ? d.token.trim() : "",
+    configured: Boolean(d.token && String(d.token).trim()),
+  };
+  return { openai, direct };
 }
 
-function envStr(name: string): string {
-  const v = process.env[name];
-  return typeof v === "string" ? v.trim() : "";
+function trimSecret(v: unknown): string | undefined {
+  return typeof v === "string" ? v.trim() : undefined;
 }
 
-function num(v: unknown, fallback: number): number {
-  const n = Number(v);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
-}
-
-function fileConfig(): Partial<StudioConfig> {
-  try {
-    const raw = fs.readFileSync(CONFIG_PATH, "utf8");
-    return JSON.parse(raw) as Partial<StudioConfig>;
-  } catch {
-    return {};
+/**
+ * 保存用户生图配置（/api/me/studio）。
+ * 密钥传空字符串/缺省 = 保持不变；显式 clear 标志 = 清除；base_url 传空 = 回退站点默认。
+ */
+export function updateUserStudio(
+  userId: string,
+  patch: {
+    openai?: { base_url?: unknown; api_key?: unknown; clear_api_key?: boolean };
+    direct?: { base_url?: unknown; token?: unknown; clear_token?: boolean };
+  },
+): ResolvedStudioCfg {
+  const current = getUserStudioCfg(userId) as UserStudioCfg;
+  const next: UserStudioCfg = {
+    openai: { ...(current.openai ?? {}) },
+    direct: { ...(current.direct ?? {}) },
+  };
+  if (patch.openai) {
+    const url = trimUrl(patch.openai.base_url);
+    if (patch.openai.base_url !== undefined) {
+      next.openai = { ...(next.openai ?? {}), base_url: url || undefined };
+    }
+    if (patch.openai.clear_api_key) {
+      next.openai = { ...(next.openai ?? {}), api_key: undefined };
+    } else {
+      const key = trimSecret(patch.openai.api_key);
+      if (key) next.openai = { ...(next.openai ?? {}), api_key: key };
+    }
   }
+  if (patch.direct) {
+    const url = trimUrl(patch.direct.base_url);
+    if (patch.direct.base_url !== undefined) {
+      next.direct = { ...(next.direct ?? {}), base_url: url || undefined };
+    }
+    if (patch.direct.clear_token) {
+      next.direct = { ...(next.direct ?? {}), token: undefined };
+    } else {
+      const token = trimSecret(patch.direct.token);
+      if (token) next.direct = { ...(next.direct ?? {}), token };
+    }
+  }
+  setUserStudioCfg(userId, next);
+  return resolveUserStudio(userId);
 }
 
-/** 配置优先级：环境变量 > data/studio.json（管理后台写入） */
-export function getStudioConfig(): StudioConfig {
-  const file = fileConfig();
-  const oFile = file.openai ?? ({} as Partial<StudioOpenAiConfig>);
-  const dFile = file.direct ?? ({} as Partial<StudioDirectConfig>);
+/** 脱敏快照（GET 接口返回用；密钥/Token 绝不回传） */
+export function describeUserStudio(userId: string) {
+  const c = resolveUserStudio(userId);
   return {
     openai: {
-      base_url: envStr("AITAG_STUDIO_OPENAI_BASE_URL") || String(oFile.base_url ?? ""),
-      api_key: envStr("AITAG_STUDIO_OPENAI_API_KEY") || String(oFile.api_key ?? ""),
-      default_model:
-        envStr("AITAG_STUDIO_OPENAI_MODEL") ||
-        String(oFile.default_model ?? "") ||
-        "nai-diffusion-4-5-full",
-      timeout_seconds: num(oFile.timeout_seconds, 180),
-      max_retries: Math.min(3, Math.max(0, num(oFile.max_retries, 2))),
+      configured: c.openai.configured,
+      base_url: c.openai.base_url,
+      api_key: c.openai.configured ? "已配置" : "未配置",
+      is_default_url: c.openai.base_url === DEFAULT_OPENAI_BASE_URL,
     },
     direct: {
-      base_url: envStr("AITAG_STUDIO_DIRECT_BASE_URL") || String(dFile.base_url ?? "") || "https://nai.sta1n.cn",
-      token: envStr("AITAG_STUDIO_DIRECT_TOKEN") || String(dFile.token ?? ""),
-      default_model: envStr("AITAG_STUDIO_DIRECT_MODEL") || String(dFile.default_model ?? "") || "nai-diffusion-4-5-full",
-      timeout_seconds: num(dFile.timeout_seconds, 180),
-    },
-  };
-}
-
-/** 管理后台保存配置（写 data/studio.json；该目录不入库） */
-export function saveStudioConfig(next: Partial<StudioConfig>): StudioConfig {
-  const current = getStudioConfig();
-  const merged: StudioConfig = {
-    openai: {
-      base_url: next.openai?.base_url?.trim() ?? current.openai.base_url,
-      api_key: next.openai?.api_key?.trim() ?? current.openai.api_key,
-      default_model: next.openai?.default_model?.trim() || current.openai.default_model,
-      timeout_seconds: num(next.openai?.timeout_seconds, current.openai.timeout_seconds),
-      max_retries: Math.min(3, Math.max(0, num(next.openai?.max_retries, current.openai.max_retries))),
-    },
-    direct: {
-      base_url: next.direct?.base_url?.trim() || current.direct.base_url,
-      token: next.direct?.token?.trim() ?? current.direct.token,
-      default_model: next.direct?.default_model?.trim() || current.direct.default_model,
-      timeout_seconds: num(next.direct?.timeout_seconds, current.direct.timeout_seconds),
-    },
-  };
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(merged, null, 2), { mode: 0o600 });
-  return merged;
-}
-
-function maskUrl(url: string): string {
-  return url ? url.replace(/:\/\/[^@/]+@/, "://***@") : "";
-}
-
-function maskKey(key: string): string {
-  if (!key) return "";
-  return key.length <= 8 ? "***" : `${key.slice(0, 4)}***${key.slice(-4)}`;
-}
-
-/** 脱敏后的配置快照（config 接口返回用，绝不含完整密钥） */
-export function describeStudioConfig() {
-  const c = getStudioConfig();
-  return {
-    openai: {
-      configured: Boolean(c.openai.base_url && c.openai.api_key),
-      base_url: maskUrl(c.openai.base_url),
-      api_key: maskKey(c.openai.api_key) ? "已配置" : "未配置",
-      default_model: c.openai.default_model,
-    },
-    direct: {
-      configured: Boolean(c.direct.token),
-      base_url: maskUrl(c.direct.base_url),
-      token: c.direct.token ? "已配置" : "未配置",
-      default_model: c.direct.default_model,
+      configured: c.direct.configured,
+      base_url: c.direct.base_url,
+      token: c.direct.configured ? "已配置" : "未配置",
+      is_default_url: c.direct.base_url === DEFAULT_DIRECT_BASE_URL,
     },
   };
 }
@@ -390,7 +367,7 @@ export interface NaiOpenAiInput {
   negative?: string;
   size: string; // WxH
   n: number;
-  model: string;
+  model?: string;
   steps?: number;
   scale?: number;
   sampler?: string;
@@ -406,14 +383,21 @@ export interface NaiOpenAiInput {
 
 const DIRECTOR_ACTIONS = new Set(["bg-removal", "lineart", "sketch", "colorize", "emotion", "declutter"]);
 
-export async function generateNaiOpenAi(cfg: StudioOpenAiConfig, input: NaiOpenAiInput): Promise<Buffer[]> {
+/** 上游请求超时 / 重试(站点级常量,不对用户开放) */
+const UPSTREAM_TIMEOUT_MS = 180_000;
+const OPENAI_MAX_RETRIES = 2;
+export const DEFAULT_NAI_OPENAI_MODEL = "nai-diffusion-4-5-full";
+export const DEFAULT_NAI_DIRECT_MODEL = "nai-diffusion-4-5-full";
+export const DEFAULT_GPTIMAGE_MODEL = "gpt-image-1";
+
+export async function generateNaiOpenAi(cfg: ResolvedStudioCfg["openai"], input: NaiOpenAiInput): Promise<Buffer[]> {
   if (!cfg.base_url || !cfg.api_key) throw new StudioError("openai_not_configured");
 
   const size = normalizeOpenAiSize(NAI_SIZE_MAP[input.size] ?? input.size);
   const [targetW, targetH] = size.split("x").map((v) => parseInt(v, 10));
 
   const isDirector = Boolean(input.director_action && DIRECTOR_ACTIONS.has(input.director_action));
-  let model = isDirector ? "director-tools" : input.model || cfg.default_model;
+  let model = isDirector ? "director-tools" : input.model || DEFAULT_NAI_OPENAI_MODEL;
 
   // 参考图（≤8 张）
   let refs = (input.reference_images ?? []).slice(0, 8);
@@ -524,8 +508,8 @@ export async function generateNaiOpenAi(cfg: StudioOpenAiConfig, input: NaiOpenA
     endpoint,
     payload,
     { "Content-Type": "application/json", Authorization: `Bearer ${cfg.api_key}` },
-    cfg.timeout_seconds * 1000,
-    cfg.max_retries,
+    UPSTREAM_TIMEOUT_MS,
+    OPENAI_MAX_RETRIES,
   );
 }
 
@@ -535,16 +519,16 @@ export interface GptImageInput {
   full_prompt: string;
   size: string; // WxH 或 auto
   n: number;
-  model: string;
+  model?: string;
   quality?: string; // low | medium | high | auto
   background?: string; // transparent | opaque | auto
   output_format?: string; // png | jpeg | webp
   reference_images?: RefImage[]; // 走 /v1/images/edits multipart
 }
 
-export async function generateGptImage(cfg: StudioOpenAiConfig, input: GptImageInput): Promise<Buffer[]> {
+export async function generateGptImage(cfg: ResolvedStudioCfg["openai"], input: GptImageInput): Promise<Buffer[]> {
   if (!cfg.base_url || !cfg.api_key) throw new StudioError("openai_not_configured");
-  const model = input.model || "gpt-image-1";
+  const model = input.model || DEFAULT_GPTIMAGE_MODEL;
   const n = Math.min(4, Math.max(1, Math.round(Number(input.n) || 1)));
   const size = toGptImageSize(input.size);
   const quality = ["low", "medium", "high", "auto"].includes(input.quality ?? "") ? input.quality : undefined;
@@ -584,7 +568,7 @@ export async function generateGptImage(cfg: StudioOpenAiConfig, input: GptImageI
       method: "POST",
       headers: { Authorization: `Bearer ${cfg.api_key}` },
       body: form,
-      signal: AbortSignal.timeout(cfg.timeout_seconds * 1000),
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     });
     const text = await resp.text();
     if (resp.status >= 400) {
@@ -602,8 +586,8 @@ export async function generateGptImage(cfg: StudioOpenAiConfig, input: GptImageI
     buildEndpoint("generations"),
     payload,
     { "Content-Type": "application/json", Authorization: `Bearer ${cfg.api_key}` },
-    cfg.timeout_seconds * 1000,
-    cfg.max_retries,
+    UPSTREAM_TIMEOUT_MS,
+    OPENAI_MAX_RETRIES,
   );
 }
 
@@ -628,7 +612,7 @@ export interface DirectInput {
   artists: string;
   negative?: string;
   size: string; // NAI 分档名（竖图/2K竖图/...）
-  model: string;
+  model?: string;
   steps?: number;
   scale?: number;
   cfg?: number;
@@ -636,14 +620,14 @@ export interface DirectInput {
   noise_schedule?: string;
 }
 
-export async function generateDirect(cfg: StudioDirectConfig, input: DirectInput): Promise<Buffer[]> {
+export async function generateDirect(cfg: ResolvedStudioCfg["direct"], input: DirectInput): Promise<Buffer[]> {
   if (!cfg.token) throw new StudioError("direct_not_configured");
   const base = cfg.base_url.replace(/\/+$/, "");
   const url =
     `${base}/generate` +
     `?tag=${encodeURIComponent(input.full_prompt)}` +
     `&token=${encodeURIComponent(cfg.token)}` +
-    `&model=${encodeURIComponent(input.model || cfg.default_model)}` +
+    `&model=${encodeURIComponent(input.model || DEFAULT_NAI_DIRECT_MODEL)}` +
     `&artist=${encodeURIComponent(input.artists ?? "")}` +
     `&size=${encodeURIComponent(input.size || "竖图")}` +
     `&steps=${Math.round(Number(input.steps) || 24)}` +
@@ -654,7 +638,7 @@ export async function generateDirect(cfg: StudioDirectConfig, input: DirectInput
     `&nocache=1` +
     `&noise_schedule=${encodeURIComponent(input.noise_schedule || "karras")}`;
   try {
-    const resp = await fetch(url, { signal: AbortSignal.timeout(cfg.timeout_seconds * 1000) });
+    const resp = await fetch(url, { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) });
     if (resp.status !== 200) {
       throw new StudioError(`http_${resp.status}|${resp.statusText || "直连接口错误"}`);
     }
@@ -668,10 +652,10 @@ export async function generateDirect(cfg: StudioDirectConfig, input: DirectInput
   }
 }
 
-// ---- 直连 Token 校验（管理后台「测试」用，GET /api/api/getUser） ----
+// ---- 直连 Token 校验（个人资料设置「测试」用，POST /api/api/getUser） ----
 
 export async function checkDirectToken(
-  cfg: StudioDirectConfig,
+  cfg: ResolvedStudioCfg["direct"],
 ): Promise<{ ok: boolean; message: string }> {
   if (!cfg.token) return { ok: false, message: "未配置 Token" };
   try {
@@ -684,6 +668,15 @@ export async function checkDirectToken(
     });
     const text = await resp.text();
     if (resp.status !== 200) return { ok: false, message: `HTTP ${resp.status}` };
+    // sta1n 对无效 Token 也返回 HTTP 200，但响应体 status=error（如 "user not found"）
+    try {
+      const parsed = JSON.parse(text) as { status?: string; message?: string };
+      if (parsed && parsed.status === "error") {
+        return { ok: false, message: parsed.message || "Token 无效" };
+      }
+    } catch {
+      /* 非 JSON 响应按 200 处理 */
+    }
     return { ok: true, message: text.slice(0, 120) };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : String(e) };
@@ -698,6 +691,3 @@ export function studioImageExtension(buf: Buffer): string {
   return "png";
 }
 
-export function randomId(): string {
-  return crypto.randomBytes(8).toString("hex");
-}

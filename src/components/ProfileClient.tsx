@@ -41,6 +41,18 @@ export default function ProfileClient({ user }: Props) {
   const [r18gMsg, setR18gMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [r18gSaving, setR18gSaving] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // 生图台密钥（个人自配，站点只提供默认 URL）
+  const [studioOpenaiUrl, setStudioOpenaiUrl] = useState("");
+  const [studioOpenaiKey, setStudioOpenaiKey] = useState("");
+  const [studioDirectUrl, setStudioDirectUrl] = useState("");
+  const [studioDirectToken, setStudioDirectToken] = useState("");
+  const [studioStatus, setStudioStatus] = useState<{
+    openai: { configured: boolean; base_url: string };
+    direct: { configured: boolean; base_url: string };
+  } | null>(null);
+  const [studioLoaded, setStudioLoaded] = useState(false);
+  const [studioMsg, setStudioMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [studioSaving, setStudioSaving] = useState(false);
 
   // 挂载时查询是否已有 token（不返回明文，仅判断状态）
   useEffect(() => {
@@ -69,6 +81,21 @@ export default function ProfileClient({ user }: Props) {
       })
       .catch(() => {})
       .finally(() => setR18gLoaded(true));
+  }, []);
+
+  // 挂载时加载生图台密钥状态
+  useEffect(() => {
+    fetch("/api/me/studio")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.config) {
+          setStudioStatus(d.config);
+          setStudioOpenaiUrl(d.config.openai.base_url || "");
+          setStudioDirectUrl(d.config.direct.base_url || "");
+        }
+      })
+      .catch(() => {})
+      .finally(() => setStudioLoaded(true));
   }, []);
 
   const handleRegenerateToken = useCallback(async () => {
@@ -203,6 +230,81 @@ export default function ProfileClient({ user }: Props) {
     [saveR18GPref, r18gEnabled],
   );
 
+  // 生图台密钥：保存（密钥留空 = 保持不变）+ 可选测试直连 Token
+  const saveStudioKeys = useCallback(
+    async (opts?: { probeDirect?: boolean; clearOpenaiKey?: boolean; clearDirectToken?: boolean }) => {
+      setStudioSaving(true);
+      setStudioMsg(null);
+      try {
+        const res = await fetch("/api/me/studio", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            openai: {
+              base_url: studioOpenaiUrl,
+              api_key: studioOpenaiKey,
+              clear_api_key: opts?.clearOpenaiKey === true,
+            },
+            direct: {
+              base_url: studioDirectUrl,
+              token: studioDirectToken,
+              clear_token: opts?.clearDirectToken === true,
+            },
+            probe_direct: opts?.probeDirect === true,
+          }),
+        });
+        const data = (await res.json()) as {
+          ok?: boolean;
+          config?: { openai: { configured: boolean; base_url: string }; direct: { configured: boolean; base_url: string } };
+          probe?: { ok: boolean; message: string } | null;
+          error?: string;
+        };
+        if (res.ok && data.ok && data.config) {
+          setStudioStatus(data.config);
+          setStudioOpenaiKey("");
+          setStudioDirectToken("");
+          let text = "✓ 已保存";
+          if (opts?.probeDirect && data.probe) {
+            text += data.probe.ok
+              ? `，直连 Token 有效`
+              : `，但直连 Token 测试失败：${data.probe.message}`;
+          }
+          setStudioMsg({ ok: opts?.probeDirect ? (data.probe?.ok ?? true) : true, text });
+        } else {
+          setStudioMsg({ ok: false, text: data.error ?? "保存失败" });
+        }
+      } catch {
+        setStudioMsg({ ok: false, text: "网络错误" });
+      } finally {
+        setStudioSaving(false);
+      }
+    },
+    [studioOpenaiUrl, studioOpenaiKey, studioDirectUrl, studioDirectToken],
+  );
+
+  const clearStudioKey = useCallback(async (target: "openai_key" | "direct_token") => {
+    setStudioSaving(true);
+    setStudioMsg(null);
+    try {
+      const res = await fetch(`/api/me/studio?target=${target}`, { method: "DELETE" });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        config?: { openai: { configured: boolean; base_url: string }; direct: { configured: boolean; base_url: string } };
+        error?: string;
+      };
+      if (res.ok && data.ok && data.config) {
+        setStudioStatus(data.config);
+        setStudioMsg({ ok: true, text: "✓ 已清除" });
+      } else {
+        setStudioMsg({ ok: false, text: data.error ?? "清除失败" });
+      }
+    } catch {
+      setStudioMsg({ ok: false, text: "网络错误" });
+    } finally {
+      setStudioSaving(false);
+    }
+  }, []);
+
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-40 backdrop-blur bg-[#0b0d10]/90 border-b border-[#262b36] px-4 sm:px-6 py-2 sm:py-3 flex items-center gap-4">
@@ -330,6 +432,137 @@ export default function ProfileClient({ user }: Props) {
             {!token && tokenMsg && (
               <p className="text-xs text-[#5a6270] mt-2">{tokenMsg}</p>
             )}
+          </div>
+
+          {/* 生图台密钥（个人自配，站点只提供默认 URL） */}
+          <div className="mt-6 pt-5 border-t border-[#262b36]">
+            <div className="text-sm font-semibold text-[#e6edf3] mb-1">
+              生图台密钥
+            </div>
+            <p className="text-xs text-[#5a6270] mb-4">
+              在<a href="/studio" className="text-[#4c9fff] hover:underline">生图台</a>生图时使用你自己的密钥，消耗你自己的额度；密钥保存在站点服务器上且不会回显。接口地址留空则使用站点默认值。
+            </p>
+            <div className="space-y-4">
+              <div className="bg-[#0f1218] border border-[#262b36] rounded-lg p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-[#e6edf3]">OpenAI 兼容（图片中转站）</span>
+                  <span
+                    className={`text-[11px] px-2 py-0.5 rounded border ${
+                      studioStatus?.openai.configured
+                        ? "bg-[#12291a] border-[#2a5a3a] text-[#7aff9a]"
+                        : "bg-[#151922] border-[#262b36] text-[#5a6270]"
+                    }`}
+                  >
+                    {studioStatus?.openai.configured ? "已配置" : "未配置"}
+                  </span>
+                </div>
+                <label className="block text-[11px] text-[#7a8394] mb-0.5" htmlFor="studio-openai-url">
+                  接口地址（默认 https://api.syuan.org）
+                </label>
+                <input
+                  id="studio-openai-url"
+                  type="text"
+                  value={studioOpenaiUrl}
+                  onChange={(e) => setStudioOpenaiUrl(e.target.value)}
+                  disabled={!studioLoaded || studioSaving}
+                  placeholder="https://api.syuan.org"
+                  spellCheck={false}
+                  className="w-full bg-[#151922] border border-[#262b36] rounded-md px-2.5 py-1.5 text-xs text-[#e6edf3] font-mono outline-none focus:border-[#4c9fff] disabled:opacity-40 mb-2"
+                />
+                <label className="block text-[11px] text-[#7a8394] mb-0.5" htmlFor="studio-openai-key">
+                  API Key（Bearer Token）
+                </label>
+                <input
+                  id="studio-openai-key"
+                  type="password"
+                  value={studioOpenaiKey}
+                  onChange={(e) => setStudioOpenaiKey(e.target.value)}
+                  disabled={!studioLoaded || studioSaving}
+                  placeholder={studioStatus?.openai.configured ? "已保存，留空保持不变" : "sk-..."}
+                  autoComplete="new-password"
+                  className="w-full bg-[#151922] border border-[#262b36] rounded-md px-2.5 py-1.5 text-xs text-[#e6edf3] font-mono outline-none focus:border-[#4c9fff] disabled:opacity-40"
+                />
+              </div>
+              <div className="bg-[#0f1218] border border-[#262b36] rounded-lg p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-[#e6edf3]">NAI 直连（nai.sta1n.cn）</span>
+                  <span
+                    className={`text-[11px] px-2 py-0.5 rounded border ${
+                      studioStatus?.direct.configured
+                        ? "bg-[#12291a] border-[#2a5a3a] text-[#7aff9a]"
+                        : "bg-[#151922] border-[#262b36] text-[#5a6270]"
+                    }`}
+                  >
+                    {studioStatus?.direct.configured ? "已配置" : "未配置"}
+                  </span>
+                </div>
+                <label className="block text-[11px] text-[#7a8394] mb-0.5" htmlFor="studio-direct-url">
+                  服务地址（默认 https://nai.sta1n.cn）
+                </label>
+                <input
+                  id="studio-direct-url"
+                  type="text"
+                  value={studioDirectUrl}
+                  onChange={(e) => setStudioDirectUrl(e.target.value)}
+                  disabled={!studioLoaded || studioSaving}
+                  placeholder="https://nai.sta1n.cn"
+                  spellCheck={false}
+                  className="w-full bg-[#151922] border border-[#262b36] rounded-md px-2.5 py-1.5 text-xs text-[#e6edf3] font-mono outline-none focus:border-[#4c9fff] disabled:opacity-40 mb-2"
+                />
+                <label className="block text-[11px] text-[#7a8394] mb-0.5" htmlFor="studio-direct-token">
+                  Token（在 nai.sta1n.cn 申请的 toUserId）
+                </label>
+                <input
+                  id="studio-direct-token"
+                  type="password"
+                  value={studioDirectToken}
+                  onChange={(e) => setStudioDirectToken(e.target.value)}
+                  disabled={!studioLoaded || studioSaving}
+                  placeholder={studioStatus?.direct.configured ? "已保存，留空保持不变" : "toUserId"}
+                  autoComplete="new-password"
+                  className="w-full bg-[#151922] border border-[#262b36] rounded-md px-2.5 py-1.5 text-xs text-[#e6edf3] font-mono outline-none focus:border-[#4c9fff] disabled:opacity-40"
+                />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => void saveStudioKeys()}
+                  disabled={!studioLoaded || studioSaving}
+                  className="text-sm bg-[#4c9fff] text-white px-4 py-2 rounded-lg hover:opacity-90 disabled:opacity-50"
+                >
+                  {studioSaving ? "保存中…" : "保存密钥"}
+                </button>
+                <button
+                  onClick={() => void saveStudioKeys({ probeDirect: true })}
+                  disabled={!studioLoaded || studioSaving}
+                  className="text-sm bg-[#151922] border border-[#262b36] text-[#e6edf3] px-3 py-2 rounded-lg hover:border-[#4c9fff] disabled:opacity-50"
+                >
+                  保存并测试直连 Token
+                </button>
+                {studioStatus?.openai.configured && (
+                  <button
+                    onClick={() => void clearStudioKey("openai_key")}
+                    disabled={studioSaving}
+                    className="text-xs text-[#ff7a7a] hover:underline disabled:opacity-50"
+                  >
+                    清除 OpenAI Key
+                  </button>
+                )}
+                {studioStatus?.direct.configured && (
+                  <button
+                    onClick={() => void clearStudioKey("direct_token")}
+                    disabled={studioSaving}
+                    className="text-xs text-[#ff7a7a] hover:underline disabled:opacity-50"
+                  >
+                    清除直连 Token
+                  </button>
+                )}
+              </div>
+              {studioMsg && (
+                <p className={`text-xs ${studioMsg.ok ? "text-green-400" : "text-red-400"}`}>
+                  {studioMsg.text}
+                </p>
+              )}
+            </div>
           </div>
 
           {/* 修改密码 */}

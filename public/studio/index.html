@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>生图台 · 图像合成与测试终端</title>
-  <link rel="stylesheet" href="./app.css?v=1.0.0" />
+  <link rel="stylesheet" href="./app.css?v=1.1.0" />
 </head>
 <body>
   <!-- 终末地等高线动态地形 Canvas + 底部工业网格 -->
@@ -82,6 +82,9 @@
             <div id="openaiConfigStatus" class="openai-config-status hidden">
               <span class="status-dot error"></span>
               <span id="openaiConfigStatusText">未配置 OpenAI 接口</span>
+              <button id="goProfileBtn" type="button" class="btn-link" style="margin-left: 8px;">
+                <span class="link-icon">→</span> 去个人资料设置配置密钥
+              </button>
             </div>
 
             <!-- 参考图上传（仅 OpenAI 兼容格式显示，最多 8 张） -->
@@ -501,70 +504,6 @@
           </div>
         </div>
 
-        <!-- 后端密钥配置（仅管理员可见） -->
-        <div class="card tactical-card acrylic-card hidden" id="adminCard">
-          <div class="card-header acrylic-header">
-            <div class="card-num-box">
-              <span class="card-number">05</span>
-              <span class="card-sec-tag">SETP</span>
-            </div>
-            <div class="card-title-group">
-              <h2 class="card-title">后端密钥配置 // ADMIN ONLY</h2>
-              <span class="card-sub-code">UPSTREAM_CREDENTIALS</span>
-            </div>
-          </div>
-
-          <div class="card-body">
-            <div class="field">
-              <label class="field-label" for="admOpenaiBaseUrl">OpenAI 兼容接口地址（如 https://api.syuan.org）</label>
-              <div class="input-wrap">
-                <input id="admOpenaiBaseUrl" type="text" class="input acrylic-input" placeholder="https://api.syuan.org" spellcheck="false" />
-              </div>
-            </div>
-            <div class="field">
-              <label class="field-label" for="admOpenaiApiKey">OpenAI 兼容接口密钥（留空保持不变）</label>
-              <div class="input-wrap">
-                <input id="admOpenaiApiKey" type="password" class="input acrylic-input" placeholder="Bearer Token" spellcheck="false" autocomplete="new-password" />
-              </div>
-            </div>
-            <div class="field">
-              <label class="field-label" for="admOpenaiModel">OpenAI 默认模型</label>
-              <div class="input-wrap">
-                <input id="admOpenaiModel" type="text" class="input acrylic-input" placeholder="nai-diffusion-4-5-full" spellcheck="false" />
-              </div>
-            </div>
-            <div class="field">
-              <label class="field-label" for="admDirectBaseUrl">NAI 直连服务地址</label>
-              <div class="input-wrap">
-                <input id="admDirectBaseUrl" type="text" class="input acrylic-input" placeholder="https://nai.sta1n.cn" spellcheck="false" />
-              </div>
-            </div>
-            <div class="field">
-              <label class="field-label" for="admDirectToken">NAI 直连 Token（toUserId，留空保持不变）</label>
-              <div class="input-wrap">
-                <input id="admDirectToken" type="password" class="input acrylic-input" placeholder="toUserId" spellcheck="false" autocomplete="new-password" />
-              </div>
-            </div>
-            <div class="field">
-              <label class="field-label" for="admDirectModel">直连默认模型</label>
-              <div class="input-wrap">
-                <input id="admDirectModel" type="text" class="input acrylic-input" placeholder="nai-diffusion-4-5-full" spellcheck="false" />
-              </div>
-            </div>
-            <div class="action-bar" style="margin-top: 8px;">
-              <button id="admSave" type="button" class="btn-primary btn-sm tactical-btn">
-                <span class="btn-icon-symbol">💾</span>
-                <span>保存配置</span>
-              </button>
-              <button id="admProbe" type="button" class="btn-secondary btn-sm tactical-btn">
-                <span class="btn-icon-symbol">⚡</span>
-                <span>测试直连 Token</span>
-              </button>
-              <span id="admSaveMsg" class="field-tech-tag"></span>
-            </div>
-          </div>
-        </div>
-
         <!-- 战术执行控制条 -->
         <div class="action-bar-container">
           <div class="action-bar">
@@ -687,6 +626,6 @@
     </main>
   </div>
 
-  <script src="./app.js?v=1.0.0"></script>
+  <script src="./app.js?v=1.1.0"></script>
 </body>
 </html>

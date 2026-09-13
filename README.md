@@ -37,7 +37,7 @@
 - **双后端**：NAI 直连（nai.sta1n.cn `GET /generate`，画师串独立 artist 参数、CFG Rescale）+ OpenAI 兼容（api.syuan.org `/v1/images/*`）
 - OpenAI 兼容下支持 **NAI 全系模型**（vibe/精准参考 ≤8 张逐图权重、img2img、director-tools 图片处理、多角色坐标、种子）与 **gpt-image 模型**（quality/background/output_format 官方参数面，参考图走 `/v1/images/edits` multipart）
 - 画师串风格预设 6 套 + 自定义；服务端权威合并 prompt；结果可下载或一键「传到图库」（自动带生成参数入库）
-- 密钥服务端保存（`data/studio.json`，chmod 600，不入库）；管理员在生图台页内配置，也可用环境变量覆盖
+- **密钥用户自配**：在「个人资料设置 → 生图台密钥」填自己的 OpenAI 兼容 Key / sta1n Token（站点默认提供 api.syuan.org 与 nai.sta1n.cn 地址，可覆盖），消耗的是各自的额度；密钥存服务器且绝不回显
 - 限流：每用户 20 次/小时、每 IP 40 次/小时
 
 ### 用户体系

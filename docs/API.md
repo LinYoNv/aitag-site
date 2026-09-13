@@ -66,7 +66,16 @@
 - `403` `{ "error": "旧密码不正确" }`
 - `400` `{ "error": "新密码至少 8 位" | "新密码不能与旧密码相同" | ... }`
 
-### 1.7 R18G 屏蔽偏好 `GET/POST /api/me/pref`
+### 1.7 生图台密钥 `GET/POST/DELETE /api/me/studio`
+需登录。生图消耗**用户自己的**上游额度；站点默认提供 URL（`https://api.syuan.org` / `https://nai.sta1n.cn`），用户只填自己的密钥。
+- `GET` → `200` `{ "ok": true, "config": { "openai": { "configured": bool, "base_url": "..." }, "direct": { "configured": bool, "base_url": "..." } } }`（**密钥/Token 绝不回显**）
+- `POST` 请求：`{ "openai": { "base_url"?, "api_key"?, "clear_api_key"? }, "direct": { "base_url"?, "token"?, "clear_token"? }, "probe_direct"? }`
+  - 密钥/Token 留空 = 保持不变；`clear_api_key`/`clear_token: true` = 清除；`base_url` 留空 = 回退站点默认
+  - `probe_direct: true` → 顺带测试 sta1n Token（响应体 `status:"error"` 视为无效）
+  - → `200` `{ "ok": true, "config": {...}, "probe": { "ok": bool, "message": "..." } | null }`
+- `DELETE /api/me/studio?target=openai_key|direct_token` → `200` `{ "ok": true, "config": {...} }`
+
+### 1.8 R18G 屏蔽偏好 `GET/POST /api/me/pref`
 需登录。偏好存在账号上，`GET /api/works` 与用户主页会自动应用（见 3.1）。
 - `GET` → `200` `{ "ok": true, "pref": { "enabled": false, "selected": [], "custom": [] } }`
 - `POST` 请求：
@@ -188,23 +197,18 @@ Query 参数：
 ## 4.5 生图台接口（2026-09-14 新增）
 
 ### 4.5.1 配置快照 `GET /api/studio/config`
-需登录。返回脱敏配置（**绝不含完整密钥**）与面板所需常量：
+需登录。返回**当前用户自己的**密钥状态（脱敏，绝不含完整密钥）与面板所需常量：
 ```json
 { "ok": true,
-  "config": { "openai": { "configured": true, "base_url": "https://api.syuan.org", "api_key": "已配置", "default_model": "nai-diffusion-4-5-full" },
-              "direct": { "configured": true, "base_url": "https://nai.sta1n.cn", "token": "已配置", "default_model": "nai-diffusion-4-5-full" } },
-  "viewer_is_admin": false,
+  "config": { "openai": { "configured": false, "base_url": "https://api.syuan.org", "api_key": "未配置", "is_default_url": true },
+              "direct": { "configured": false, "base_url": "https://nai.sta1n.cn", "token": "未配置", "is_default_url": true } },
+  "defaults": { "openai_base_url": "https://api.syuan.org", "direct_base_url": "https://nai.sta1n.cn" },
   "openai_models": ["nai-diffusion-5-full", ...],
   "gptimage_models": ["gpt-image-1"],
   "default_negative": "...", "openai_vibe_strength": 0.6, "openai_director_strength": 1.0,
   "openai_director_caption": "character&style" }
 ```
-
-### 4.5.2 保存配置 `POST /api/studio/config`
-**仅管理员**（403 非管理员）。请求 `{ "openai": { "base_url", "api_key", "default_model" }, "direct": { "base_url", "token", "default_model" }, "probe_direct": false }`。
-- 密钥/Token **留空 = 保持不变**；`probe_direct: true` 时顺带校验直连 Token（`POST {direct}/api/api/getUser`）
-- `200` `{ "ok": true, "config": {...}, "probe": { "ok": true, "message": "..." } | null }`
-- 配置落 `data/studio.json`（不入库）；环境变量 `AITAG_STUDIO_OPENAI_BASE_URL/_API_KEY/_MODEL`、`AITAG_STUDIO_DIRECT_BASE_URL/_TOKEN/_MODEL` 优先
+用户自配密钥走 `GET/POST/DELETE /api/me/studio`（见 §1.7）；密钥明文存 `users.studio_cfg`，服务端调上游使用。
 
 ### 4.5.3 生成 `POST /api/studio/generate`
 需登录。**限流：20 次/小时/用户 + 40 次/小时/IP**（生图消耗上游额度）。请求体（与生图台面板同构）：
@@ -226,7 +230,7 @@ Query 参数：
 
 响应：
 - `200` `{ "ok": true, "data": [{ "b64_json": "...", "ext": "png" }], "merge_info": { "nai_prompt", "nl_prompt", "artists", "full_prompt" }, "meta": { "backend", "kind": "nai"|"gptimage", "model", "size", "n", "elapsed_ms", "user" } }`
-- `400` 参数缺失（如 director-tools 无源图）；`429` 限流；`502` 上游错误（`error` 已翻译）；`504` 超时（上游可能仍在生成，不自动重试）
+- `400` 参数缺失（如 director-tools 无源图）或**用户未配置对应后端密钥**（reason 为 `key_not_configured`，文案引导到个人资料设置）；`429` 限流；`502` 上游错误（`error` 已翻译）；`504` 超时（上游可能仍在生成，不自动重试）
 
 ---
 
@@ -253,6 +257,7 @@ Query 参数：
 
 | 日期 | 变更 | 影响 |
 |---|---|---|
+| 2026-09-14 | 生图台密钥改为**用户自配**：新增 `/api/me/studio`（GET/POST/DELETE）；`/api/studio/config` 改为当前用户状态快照（移除管理员 POST）；生成时按用户密钥调用上游 | 未配置密钥的用户生图返回 400 引导配置；消耗各自的额度 |
 | 2026-09-14 | 新增生图台接口：`GET/POST /api/studio/config`、`POST /api/studio/generate`（NAI 直连 + OpenAI 兼容 NAI 全系 + gpt-image） | 面板调用；限流 20 次/时/用户、40 次/时/IP |
 | 2026-09-14 | 文档修正：`GET /api/works/[id]` 响应不含 `user_liked`/`user_bookmarked`（此前示例多写了这两个字段，代码从未返回） | 仅文档修正，代码无变化 |
 | 2026-09-09 | 新增 `POST /api/me/password`（修改密码）与 `GET/POST /api/me/pref`（R18G 屏蔽偏好） | 外部脚本可自助改密/管理偏好 |

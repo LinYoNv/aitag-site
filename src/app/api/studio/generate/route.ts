@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/lib/auth";
 import { rateLimit, clientIp } from "@/lib/ratelimit";
 import {
-  getStudioConfig,
+  resolveUserStudio,
+  DEFAULT_NAI_OPENAI_MODEL,
+  DEFAULT_NAI_DIRECT_MODEL,
+  DEFAULT_GPTIMAGE_MODEL,
   generateNaiOpenAi,
   generateGptImage,
   generateDirect,
@@ -102,10 +105,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "请至少填写一个提示词框（NAI 风格或自然语言）" }, { status: 400 });
   }
 
-  const cfg = getStudioConfig();
+  // 每个用户用自己的密钥（个人资料设置页配置），站点只提供默认 URL
+  const cfg = resolveUserStudio(user.id);
   const model = String(body.model ?? "").trim();
   const isGpt = backend === "openai" && isGptImageModel(model);
   const n = Math.min(6, Math.max(1, Math.round(Number(body.n) || 1)));
+  const notConfigured = (side: "openai" | "direct") =>
+    NextResponse.json(
+      { error: `你还未配置${side === "openai" ? "OpenAI 兼容（syuan）" : "NAI 直连（sta1n）"}的密钥，请到「个人资料设置 → 生图台密钥」填写`, reason: "key_not_configured" },
+      { status: 400 },
+    );
+  if (backend === "direct" && !cfg.direct.configured) return notConfigured("direct");
+  if (backend === "openai" && !cfg.openai.configured) return notConfigured("openai");
 
   // 参考图（openai 后端）
   const strengths = Array.isArray(body.reference_strengths) ? body.reference_strengths : [];
@@ -141,7 +152,7 @@ export async function POST(req: NextRequest) {
         // 直连接口吃 NAI 分档名（竖图/2K竖图/...）；客户端若传了 WxH（OpenAI
         // 风格），反查映射表还原为分档名
         size: reverseNaiSize(actualSize),
-        model: model || cfg.direct.default_model,
+        model: model || undefined,
         steps: Number(body.steps),
         scale: Number(body.scale),
         cfg: Number(body.cfg),
@@ -163,7 +174,7 @@ export async function POST(req: NextRequest) {
         full_prompt: fullPrompt,
         size: actualSize,
         n,
-        model: model || "gpt-image-1",
+        model: model || undefined,
         quality: body.quality,
         background: body.background,
         output_format: body.output_format,
@@ -186,7 +197,7 @@ export async function POST(req: NextRequest) {
         negative: body.negative,
         size: actualSize,
         n,
-        model: model || cfg.openai.default_model,
+        model: model || undefined,
         steps: Number(body.steps),
         scale: Number(body.scale),
         sampler: body.sampler,
@@ -228,7 +239,7 @@ export async function POST(req: NextRequest) {
       meta: {
         backend,
         kind: isGpt ? "gptimage" : "nai",
-        model: model || (backend === "direct" ? cfg.direct.default_model : cfg.openai.default_model),
+        model: model || (backend === "direct" ? DEFAULT_NAI_DIRECT_MODEL : isGpt ? DEFAULT_GPTIMAGE_MODEL : DEFAULT_NAI_OPENAI_MODEL),
         size: actualSize,
         n: data.length,
         elapsed_ms: Date.now() - started,
