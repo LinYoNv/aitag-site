@@ -16,6 +16,25 @@ import {
 export const SESSION_COOKIE = "aitag_session";
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 天
 
+/** 保留用户名：用户名默认会作为作品作者名展示，禁止冒充管理员/官方 */
+const RESERVED_USERNAMES = new Set([
+  "admin",
+  "administrator",
+  "root",
+  "system",
+  "official",
+  "moderator",
+  "mod",
+  "staff",
+  "support",
+  "aitag",
+  "管理员",
+  "官方",
+  "系统",
+  "客服",
+  "站长",
+]);
+
 /** scrypt 哈希密码：格式 salt:hash */
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString("hex");
@@ -44,17 +63,20 @@ export function registerUser(
   if (name.length > 30) return { ok: false, error: "用户名最长 30 字符" };
   if (!/^[a-zA-Z0-9_\u4e00-\u9fa5]+$/.test(name))
     return { ok: false, error: "用户名只能包含字母、数字、下划线、中文" };
+  if (RESERVED_USERNAMES.has(name.toLowerCase()))
+    return { ok: false, error: "该用户名为系统保留名，请换一个" };
   // 反馈前端已有的快捷注册不再可用：密码下限提到 8 位（仅新注册，存量用户不受影响）
   if (!password || password.length < 8) return { ok: false, error: "密码至少 8 位" };
-  if (getUserByUsername(name)) return { ok: false, error: "用户名已存在" };
+  // 大小写不敏感查重：Admin / admin 视为同名（getUserByUsername 内部 NOCASE）
+  if (getUserByUsername(name)) return { ok: false, error: "用户名已存在（大小写不同也算重复）" };
 
   const id = crypto.randomBytes(8).toString("hex");
   try {
     createUser({ id, username: name, password_hash: hashPassword(password), role });
   } catch (e) {
-    // 并发注册同名：UNIQUE 约束冲突 → 友好错误（不再静默吞掉/非空断言崩溃）
+    // 并发注册同名：UNIQUE 约束/唯一索引冲突 → 友好错误（不再静默吞掉/非空断言崩溃）
     if (e instanceof Error && /UNIQUE/i.test(e.message)) {
-      return { ok: false, error: "用户名已存在" };
+      return { ok: false, error: "用户名已存在（大小写不同也算重复）" };
     }
     throw e;
   }

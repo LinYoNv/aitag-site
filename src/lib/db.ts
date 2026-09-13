@@ -123,6 +123,16 @@ export function getDb(): DatabaseSync {
     if (!cols.some((c) => c.name === "studio_cfg")) {
       db.exec(`ALTER TABLE users ADD COLUMN studio_cfg TEXT NOT NULL DEFAULT ''`);
     }
+    // 用户名唯一性兜底：TEXT UNIQUE 默认区分大小写（"Admin" 能和 "admin" 共存 = 冒充风险）
+    // 用 lower(username) 唯一索引把大小写不同的同名也挡住（中文无大小写，不受影响）
+    try {
+      db.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users(lower(username))`,
+      );
+    } catch (e) {
+      // 存量库若已存在大小写不同的同名用户，索引建不上：告警但不阻断启动
+      console.error("[db] 用户名大小写唯一索引创建失败（存量同名冲突）:", e);
+    }
   }
   return db;
 }
@@ -626,11 +636,12 @@ function hashApiToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
+/** 按用户名查用户（大小写不敏感："Admin" 与 "admin" 视为同一人，防冒充/防重名） */
 export function getUserByUsername(username: string): UserRow | null {
   const d = getDb();
-  const row = d.prepare("SELECT * FROM users WHERE username = ?").get(username) as
-    | Record<string, unknown>
-    | undefined;
+  const row = d
+    .prepare("SELECT * FROM users WHERE username = ? COLLATE NOCASE")
+    .get(username.trim()) as Record<string, unknown> | undefined;
   return row ? (row as unknown as UserRow) : null;
 }
 
