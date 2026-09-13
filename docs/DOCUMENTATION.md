@@ -21,24 +21,24 @@
 
 ## 2. 运行与访问
 
-> ⚠️ 本表只保留**脱敏**信息（公开仓库可见）。真实 IP、服务器路径、systemd 单元、Caddyfile 等运维细节见服务器本地文档 `DEV_NOTES.md`（不提交）。管理员凭据见服务器本地的 `.admin-cred.tmp`。
+> ⚠️ 本表只保留**脱敏**信息（公开仓库可见）。真实 IP、服务器路径、服务名、反代拓扑、密钥管理等运维与安全细节见本地运维文档（`DEV_NOTES.md` / 工作区 `AGENTS.md`，均不提交）。
 
 | 项 | 值 |
 |---|---|
-| 生产部署（Linux 服务器） | `<部署目录>/`（Next standalone，systemd 服务监听 **127.0.0.1** 内部端口） |
+| 生产部署（Linux 服务器） | `<部署目录>/`（Next standalone，systemd 服务只监听 **127.0.0.1** 内部端口） |
 | 源码（本机） | `<本地源码目录>/`（git 仓库，remote=GitHub `LinYoNv/aitag-site`，仅提交源码，/data /public/images 不入库） |
-| **HTTPS 域名**（Caddy 反代 + Cloudflare 灰云） | **`https://juocho.kdns.fr`** |
+| **HTTPS 域名 / 服务器 IP / 服务名** | 见本地运维文档（不入库） |
 | 线上数据库 | `<部署目录>/data/aitag.db` |
 | Node 版本 | 生产机与本机均 v24+（内置 `node:sqlite`） |
 
-**HTTPS 反向代理**：Caddy 反代 443 → Next standalone 内部端口；Cloudflare 灰云解析域名到源站。Let's Encrypt 自动签发/续期证书。
+**HTTPS 反向代理**：反代 443 → Next standalone 内部端口（拓扑细节见本地运维文档）。
 
 **服务管理**（服务器本机）：
 ```bash
-systemctl status aitag-site     # Next 站本身（内部端口）
-systemctl status caddy          # HTTPS 反代（443）
-systemctl restart aitag-site    # 部署新构建后重启 Next
-systemctl reload caddy          # 改 Caddyfile 后重载
+systemctl status <服务名>      # Next 站本身（内部端口）
+systemctl status <反代服务>    # HTTPS 反代
+systemctl restart <服务名>     # 部署新构建后重启 Next
+systemctl reload <反代服务>    # 改反代配置后重载
 ```
 
 **部署流程（改代码后上线）**：
@@ -46,10 +46,9 @@ systemctl reload caddy          # 改 Caddyfile 后重载
 2. `git add -A && git commit && git push origin main`
 3. 服务器：`cd <源码目录> && git pull origin main && npx next build`
 4. 服务器部署：`rm -rf <部署目录>/.next && cp -r .next/standalone/.next <部署目录>/.next && cp .next/standalone/server.js <部署目录>/server.js && rm -rf <部署目录>/node_modules && cp -r .next/standalone/node_modules <部署目录>/node_modules && mkdir -p <部署目录>/.next/static && cp -r .next/static/. <部署目录>/.next/static/`
-5. `systemctl restart aitag-site`（Caddy 无需动，仍反代内部端口）
+5. `systemctl restart <服务名>`（反代无需动，仍反代内部端口）
 ⚠️ **必须拷 `.next/static`**（standalone 产物不含它）；⚠️ **不要覆盖** `<部署目录>/data/` 与 `public/images/`（用户数据）。
-💡 访问入口：`https://juocho.kdns.fr`。
-💡 健康检查：`curl -s -o /dev/null -w "%{http_code}" https://juocho.kdns.fr/login`（预期 200；**接口均需登录**，不要用 `/api/*` 做健康检查）。
+💡 健康检查：`curl -s -o /dev/null -w "%{http_code}" https://<站点域名>/login`（预期 200；**接口均需登录**，不要用 `/api/*` 做健康检查）。
 
 ---
 
@@ -134,7 +133,7 @@ systemctl reload caddy          # 改 Caddyfile 后重载
 - 作者 = token 绑定账号；成功 `201 {ok:true, ids:[...], count:N}`；token 无效 `401 {error:"请先登录"}`
 - 示例：
   ```bash
-  curl -X POST https://juocho.kdns.fr/api/upload \
+  curl -X POST https://<站点域名>/api/upload \
     -H "Authorization: Bearer <token>" \
     -F "files=@作品.png"
   ```
@@ -200,7 +199,7 @@ systemctl reload caddy          # 改 Caddyfile 后重载
 | avatar | TEXT | 头像 URL（`/api/avatars/...`，空=默认图标） |
 | create_date | TEXT | ISO |
 | api_token_hash | TEXT | API Token 的 SHA-256 哈希（**不存明文**；空=未生成） |
-| studio_cfg | TEXT(JSON) | 生图台个人密钥 `{openai:{base_url,api_key},direct:{base_url,token}}`（**含明文密钥**——服务端调上游需要；任何接口都不回显） |
+| studio_cfg | TEXT(JSON) | 生图台个人密钥配置（服务端加密存储；任何接口都不回显，详见本地运维文档） |
 | r18g_pref | TEXT(JSON) | R18G 屏蔽偏好 `{enabled, selected[], custom[]}`（`getUserPref` 容错解析，损坏/缺字段回退默认） |
 
 ### user_actions（点赞/收藏记录）
@@ -300,7 +299,7 @@ systemctl reload caddy          # 改 Caddyfile 后重载
 ### 脚本（`scripts/`）
 | 文件 | 用途 |
 |---|---|
-| `create-admin.mjs` | 创建 admin（幂等）：`node scripts/create-admin.mjs <用户名> <密码>`；支持 `DATABASE_PATH` 指向其他库（如 hk3 生产库） |
+| `create-admin.mjs` | 创建 admin（幂等）：`node scripts/create-admin.mjs <用户名> <密码>`；支持 `DATABASE_PATH` 指向其他库（如生产库） |
 | `seed.mjs` | 种子数据导入：从 AstrBot 图片目录挑 N 张 NovelAI PNG，解析元数据 → 拷到 `public/images/works/` → 写 SQLite |
 | `recalc-metadata.mjs` | 解析器升级后对存量作品重算 metadata（自动备份；`AITAG_DB` 指定库，`--dry-run` 预览） |
 | `test-parser.mjs` | ComfyUI 解析器冒烟测试：临时编译 `src/lib/png.ts` 后跑样例 workflow 断言 |
@@ -340,15 +339,11 @@ systemctl reload caddy          # 改 Caddyfile 后重载
 23. **ComfyUI 角色传播式提示词提取（2026-09-08，commit 233b6a5）**：`parseComfyUi` 不再依赖节点名白名单，从采样器 positive/negative 端口沿引用链反向遍历取文本（字段名点名角色优先，与当前链路相反角色的字段跳过防污染，JoinStringMulti/Concatenate 按 delimiter 拼接）；节点叫什么名字都能覆盖。
 24. **详情页图片下载按钮（2026-09-09，commit 3f71e76）**：`CardMetaView` 每图参数区提供下载按钮（fetch → blob → `aitag-image-N.<ext>` 下载；失败降级为新窗口打开原图）。
 25. **用户名唯一性大小写不敏感（2026-09-14，commit 50f4105）**：users 表加 `lower(username)` 唯一索引，`getUserByUsername` 查重与登录均不区分大小写；注册拒绝系统保留名（admin/administrator/root/system/official/moderator/mod/staff/support/aitag/管理员/官方/系统/客服/站长）——用户名默认作为作品作者名展示，防冒充管理员/官方。
-27. **生图台安全加固（2026-09-14，渗透测试后）**：
-    - **SSRF 防护**：用户可自定义上游 base_url，线上实测可指向 `127.0.0.1:3101` 等内网地址探内网端口。现 `assertSafeUpstreamBase` 在**保存/读取/发请求**三处强制校验——仅接受 `https://` 公网地址，内网/环回/link-local/CGNAT/非 https 一律拒绝（保存时静默回退站点默认；调用时抛 `upstream_blocked`）。上游返回的图片下载 URL 同样校验。本地联调可用 `AITAG_STUDIO_ALLOW_INSECURE=1` 全放开。
-    - **落盘加密**：`users.studio_cfg` 用 AES-256-GCM 加密存储（`enc:v1:` 前缀），防数据库文件单独泄漏。密钥 `AITAG_STUDIO_SECRET` 环境变量（≥32 字符，生产推荐）优先，否则自动生成 `data/studio.secret`（0600）；密钥丢失=全部密钥作废（用户重填即可），旧明文兼容读取、下次保存自动转密文。
-    - **DoS 上限**：生图 prompt 8000 / negative 4000 字符截断；单张参考图 data URI ≤11MB、请求体 ≤96MB（413）；R18G 自定义词 ≤50 个；`/api/works?block_tags` 恢复生效（≤20 词 ×40 字符——此前服务端漏读该参数，画廊屏蔽框失效）。
-    - **key 不外泄**（实测）：`/api/me/studio`、`/api/studio/config`、`/api/me` 均只返回 `已配置/未配置` 状态；`safeUser` 白名单序列化不含 studio_cfg；作品搜索搜不到密钥。
+27. **生图台安全加固（2026-09-14，渗透测试后）**：上游地址强制 https 公网、个人密钥落盘加密、请求体/提示词/词表多档上限、`/api/works?block_tags` 恢复生效。实现细节与密钥管理**只存本地运维文档，不入库**。
 26. **生图台（2026-09-14）**：`/studio`（requireLogin）全屏内嵌 `public/studio/` 静态面板（index.html + app.css + app.js，UI 移植自 nai_image test-panel 并保持其 ENDFIELD 视觉）。后端 `src/lib/studio.ts` 双上游：
     - **direct**（nai.sta1n.cn）：`GET /generate?tag&token&model&artist&size&steps&scale&cfg&sampler&negative&nocache=1&noise_schedule`，响应=图片字节；画师串走独立 `artist` 参数；**cfg 仅此链路发送**。
     - **openai**（api.syuan.org 等）：NAI 模型按 nai_image 契约——`/v1/images/generations` 顶层 `prompt/size/n/model/action` + `parameters{steps,scale,sampler,noise_schedule,seed,negative_prompt,reference_image_multiple,reference_strength_multiple,director_reference_*,use_coords,characterPrompts,v4_prompt}`，img2img 走 `/v1/images/edits`；尺寸契约 64 倍数/最大边 1920/面积 3686400（4K 档降级 2K）；参考图 ≤8 张，img2img 用 sharp 精确 cover 到目标尺寸、vibe/director 等比缩限；重试 408/429/502/503/504 + "稍后重试"类文案（2/4/8s 退避），超时不重试。gpt-image 模型（`gpt-image-*`）自动切换官方参数面：`quality/background/output_format`，参考图走 `/v1/images/edits` multipart `image[]`，NAI 参数自动忽略。
-    - **密钥用户自配（2026-09-14 起）**：站点只提供默认 URL（`https://api.syuan.org` / `https://nai.sta1n.cn`，可在个人资料设置覆盖），每个用户在「个人资料设置 → 生图台密钥」填自己的 OpenAI Key / sta1n Token，生图消耗各自的额度。密钥明文存 `users.studio_cfg`（服务端调上游必需；`/api/me/studio` 与 `/api/studio/config` 一律不回显，GET 只给 `已配置/未配置` 状态）。未配置时生图返回 400 并引导去个人资料设置；`POST /api/me/studio` 支持 `probe_direct` 测试 sta1n Token（`POST /api/api/getUser`，响应体 `status:"error"` 视为无效）。
+    - **密钥用户自配（2026-09-14 起）**：站点只提供默认 URL（`https://api.syuan.org` / `https://nai.sta1n.cn`，可在个人资料设置覆盖），每个用户在「个人资料设置 → 生图台密钥」填自己的 OpenAI Key / sta1n Token，生图消耗各自的额度。密钥服务端加密存 `users.studio_cfg`（`/api/me/studio` 与 `/api/studio/config` 一律不回显，GET 只给 `已配置/未配置` 状态；加密与密钥管理见本地运维文档）。未配置时生图返回 400 并引导去个人资料设置；`POST /api/me/studio` 支持 `probe_direct` 测试 sta1n Token（`POST /api/api/getUser`，响应体 `status:"error"` 视为无效）。
     - **结果入库**：结果卡「传到图库」走 `POST /api/upload`（b64→File + `meta_0` 带完整 prompt/参数，gpt-image 用 ai_type=other）。
 
 ---
@@ -358,7 +353,7 @@ systemctl reload caddy          # 改 Caddyfile 后重载
 > ⚠️ 本节只保留**脱敏**信息。管理员密码、生产机登录方式、Git 推送凭据、数据库实际路径等运维细节见服务器本地 `DEV_NOTES.md`（不提交）。
 
 - **admin**：用户名 `admin`，role=admin（生产库已有该账号；密码存服务器本地凭据文件，chmod 600，不提交仓库）。
-- **生产 DB**：`<部署目录>/data/aitag.db`（40 条作品，21 个用户；含 users/sessions/user_actions/view_logs 表）。域名 `juocho.kdns.fr` 走 Cloudflare 灰云解析。
+- **生产 DB**：`<部署目录>/data/aitag.db`（40 条作品，21 个用户；含 users/sessions/user_actions/view_logs 表）。
 - **GitHub**：`https://github.com/LinYoNv/aitag-site`，分支 `main`；推送用本地代理 + 一次性凭据 helper（详见 DEV_NOTES.md）。
 - **API 测试小抄**：注册→登录→me→上传→登出，见 `login-register-progress.md` §自测。
 
