@@ -73,7 +73,8 @@
 - `POST` 请求：`{ "openai": { "base_url"?, "api_key"?, "clear_api_key"? }, "direct": { "base_url"?, "token"?, "clear_token"? }, "probe_direct"? }`
   - 密钥/Token 留空 = 保持不变；`clear_api_key`/`clear_token: true` = 清除；`base_url` 留空 = 回退站点默认
   - **base_url 仅接受 `https://` 公网地址**（安全策略：内网/环回/非 https 一律忽略并回退站点默认）
-  - `probe_direct: true` → 顺带测试 sta1n Token（响应体 `status:"error"` 视为无效）
+  - `probe: "direct"` 或 `probe_direct: true` → 免费探测 sta1n Token（getUser，响应体 `status:"error"` 视为无效）
+  - `probe: "openai"` → 用保存后的配置发一次最小真实生图验证 Key（**消耗用户自己约 1 点额度**，测试图不保存）
   - → `200` `{ "ok": true, "config": {...}, "probe": { "ok": bool, "message": "..." } | null }`
 - `DELETE /api/me/studio?target=openai_key|direct_token` → `200` `{ "ok": true, "config": {...} }`
 
@@ -259,7 +260,8 @@ Query 参数：
 
 | 日期 | 变更 | 影响 |
 |---|---|---|
-| 2026-09-14 | 生图台安全加固：base_url 强制 https 公网、个人密钥加密存储、prompt/参考图/请求体上限；`/api/works?block_tags` 恢复生效（≤20 词）；R18G 自定义词 ≤50 | 合法使用无感；内网上游地址被拒 |
+| 2026-09-14 | 修复个人密钥落盘加密的密钥派生不一致（两种来源写入的行互相读不开）；存量行已自动迁移重加密 | 用户无感；此前保存过密钥的无需重填 |
+| 2026-09-14 | `/api/me/studio` 新增 `probe:"openai"|"direct"` 分端测试；生图台 OpenAI 模式隐藏 CFG Rescale（该端点不提交） | 个人资料页两框各自「测试」按钮 |：base_url 强制 https 公网、个人密钥加密存储、prompt/参考图/请求体上限；`/api/works?block_tags` 恢复生效（≤20 词）；R18G 自定义词 ≤50 | 合法使用无感；内网上游地址被拒 |
 | 2026-09-14 | 注册：用户名唯一性改大小写不敏感（unique 索引重建）+ 系统保留名黑名单 | 与既有用户仅大小写不同的用户名无法再注册；登录不区分大小写 |
 | 2026-09-14 | 生图台密钥改为**用户自配**：新增 `/api/me/studio`（GET/POST/DELETE）；`/api/studio/config` 改为当前用户状态快照（移除管理员 POST）；生成时按用户密钥调用上游 | 未配置密钥的用户生图返回 400 引导配置；消耗各自的额度 |
 | 2026-09-14 | 新增生图台接口：`GET/POST /api/studio/config`、`POST /api/studio/generate`（NAI 直连 + OpenAI 兼容 NAI 全系 + gpt-image） | 面板调用；限流 20 次/时/用户、40 次/时/IP |
