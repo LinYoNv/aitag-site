@@ -254,7 +254,7 @@
     var bHideDelete = mkBtn("隐藏删除按钮", "◎");
     var bRandom = mkBtn("一键随机 Tag", "✦", "is-accent");
     var bRandomRule = mkBtn("设置随机 Tag 规则", "⚙");
-    var bCopy = mkBtn("复制提示词", "⎘");
+    var bCopy = mkBtn("复制提示词")  // 不给图标：部分环境缺字形会显示成方框;
     toolbar.appendChild(bClearDisabled);
     toolbar.appendChild(bClearAll);
     toolbar.appendChild(bHideDelete);
