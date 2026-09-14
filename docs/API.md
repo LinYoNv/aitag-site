@@ -237,6 +237,26 @@ Query 参数：
 
 ---
 
+### 4.5.3 中文提示词库 `GET /api/studio/tags`
+需登录（面板内调用）。数据来自 `data/taglib.db` —— 由 `node scripts/taglib-import.mjs`
+从 WeiLin-Comfyui-Tools-panel 的中文词库同步而来（上游 GPL-3.0，产物不进仓库）。
+
+- 无参数：返回完整分类树，结构与 `public/studio/tags.default.json` **完全一致**（前端可原样替换基础库）
+```json
+{ "ok": true, "synced": true, "version": 1, "name": "WeiLin 中文词库",
+  "note": "词库数据来源：WeiLin-Comfyui-Tools-panel 中文标签库（GPL-3.0）…",
+  "source": "https://raw.githubusercontent.com/.../userdatas_zh_CN.db",
+  "imported_at": "2026-09-14T11:50:03.467Z",
+  "categories": [{ "id": "c1", "name": "人物",
+                   "groups": [{ "id": "g1", "name": "对象", "tags": [{ "name": "1girl", "zh": "1女孩" }] }] }] }
+```
+- `?q=<词>`：在 danbooru 中文表（2.2 万条带翻译）里补充检索，`{ "ok": true, "query": "...", "tags": [{ "name": "long_hair", "zh": "长发" }] }`；
+  英文与中文都匹配（`LOWER(tag) LIKE` 或 `zh LIKE`），精确/前缀命中优先。
+- **词库未同步**时不报错：`200 { "ok": false, "synced": false, "hint": "…" }`，面板据此回退到自带的 `tags.default.json`。
+- 响应带 `Cache-Control: private, max-age=300`（词库只在重新导入时变化）。
+
+---
+
 ## 5. 其他
 
 - `GET /api/config`（公开）：`{ "site_name", "image_prefix", "languages", "default_language", "upload_enabled" }`
@@ -260,6 +280,10 @@ Query 参数：
 
 | 日期 | 变更 | 影响 |
 |---|---|---|
+| 2026-09-14 | 新增 `GET /api/studio/tags`：面板词库改为服务端 WeiLin 中文词库（11 分类 / 132 分组 / 4086 标签，另有 2.2 万条 danbooru 中文可检索）；未同步时面板自动回退自带起始库 | 标签管理从「起始库」变成真实词库；`data/taglib.db` 不进仓库，由部署脚本单独同步 |
+| 2026-09-14 | 生图日志补 `参考图字节` / `强度[]` / `描述[]`（对齐 AstrBot 的 `ref_bytes` 口径） | 只靠「参考图=n/m」无法判断实际传了什么，现在可直接对比两边入参 |
+| 2026-09-14 | 精准参考（director）改为**非 4.5 系一律回退 `nai-diffusion-4-5-full` 并打日志**；上游实测只支持 4.5（请求 5 系报 500 precise reference is only supported by NAI 4.5 models） | 选 5 系 + director 不再直接失败；面板提示文案同步更正 |
+| 2026-09-14 | 面板：切换参考模式时按新模式默认值刷新逐图强度（vibe 0.6 / director 1.0），用户手改过的值保留 | 修复「从 vibe 切到 director 后强度仍是 0.6，人物一致性不如预期」 |
 | 2026-09-14 | 修复个人密钥落盘加密的密钥派生不一致（两种来源写入的行互相读不开）；存量行已自动迁移重加密 | 用户无感；此前保存过密钥的无需重填 |
 | 2026-09-14 | `/api/me/studio` 新增 `probe:"openai"|"direct"` 分端测试；生图台 OpenAI 模式隐藏 CFG Rescale（该端点不提交） | 个人资料页两框各自「测试」按钮 |：base_url 强制 https 公网、个人密钥加密存储、prompt/参考图/请求体上限；`/api/works?block_tags` 恢复生效（≤20 词）；R18G 自定义词 ≤50 | 合法使用无感；内网上游地址被拒 |
 | 2026-09-14 | 注册：用户名唯一性改大小写不敏感（unique 索引重建）+ 系统保留名黑名单 | 与既有用户仅大小写不同的用户名无法再注册；登录不区分大小写 |

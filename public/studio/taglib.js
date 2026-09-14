@@ -5,7 +5,8 @@
  * 按需求做了两处删减：**不含 LoRA 管理**、**不含一键翻译**（只提供提示词本身）。
  *
  * 数据分两层：
- *   1) 服务器静态库 public/studio/tags.default.json —— 全站共享，情绪后续提供的正式词库直接替换它
+ *   1) 服务器词库 —— 优先取 /api/studio/tags（WeiLin 中文词库同步产物，约 4000 标签）；
+ *      接口不可用时回退到自带的 public/studio/tags.default.json（起始库，仅打通流程用）
  *   2) 浏览器本地覆盖层 localStorage —— 个人新增/删除/禁用/偏好，不污染共享库
  *
  * 对外接口：window.StudioTagLib.open({ textareaId })  （默认作用于 #naiPrompt）
@@ -13,7 +14,9 @@
 (function () {
   "use strict";
 
-  var LIB_URL = "./tags.default.json";
+  // 服务端词库优先；拿不到就退回仓库里自带的起始库
+  var LIB_API_URL = "/api/studio/tags";
+  var LIB_FALLBACK_URL = "./tags.default.json";
   var K_CUSTOM = "studio.taglib.custom.v1";
   var K_PREFS = "studio.taglib.prefs.v1";
 
@@ -329,6 +332,10 @@
     footTitle.appendChild(document.createTextNode("选择分类"));
     footTitle.appendChild(el("small", null, "SELECT CATEGORY / GROUP"));
     foot.appendChild(footTitle);
+    // 词库来源署名：WeiLin 词库是 GPL-3.0，界面上必须保留出处
+    var libNote = el("div", "tl-lib-note", "");
+    libNote.title = "";
+    foot.appendChild(libNote);
     foot.appendChild(el("div", "tl-spacer"));
     var bAddTag = mkBtn("+ 添加 Tag", null, "is-accent");
     var bExport = mkBtn("导出 Tag", "⇩");
@@ -347,6 +354,7 @@
 
     dom = {
       overlay: overlay,
+      body: body,
       ta: ta,
       counter: counter,
       search: search,
@@ -357,6 +365,7 @@
       autoCb: autoCb,
       section: section,
       caret: caret,
+      libNote: libNote,
     };
 
     // ===== 事件绑定 =====
@@ -547,9 +556,11 @@
         state.prefs.lastGroup = state.groupId;
         savePrefs();
         renderAll();
+        scrollTagsIntoView();
       });
       dom.cats.appendChild(b);
     });
+    scrollChipIntoView(dom.cats, dom.cats.querySelector(".tl-cat.is-active"));
     var add = mkBtn("+ 添加分类", null);
     add.classList.add("tl-add-chip");
     add.addEventListener("click", function () {
@@ -583,6 +594,7 @@
       state.prefs.lastGroup = "__all";
       savePrefs();
       renderAll();
+      scrollTagsIntoView();
     });
     dom.groups.appendChild(all);
 
@@ -625,6 +637,7 @@
         state.prefs.lastGroup = g.id;
         savePrefs();
         renderAll();
+        scrollTagsIntoView();
       });
       dom.groups.appendChild(b);
     });
@@ -645,6 +658,7 @@
       });
     });
     dom.groups.appendChild(addG);
+    scrollChipIntoView(dom.groups, dom.groups.querySelector(".tl-group-chip.is-active"));
   }
 
   function findCustomCategory(catId, create) {
@@ -698,6 +712,32 @@
       return an - bn;
     });
     return out.slice(0, 300);
+  }
+
+  // 手机端分类/分组是单行横滑的：把选中项横向拨进视野（只动横向，不碰纵向滚动）
+  function scrollChipIntoView(row, chip) {
+    if (!row || !chip || !row.scrollWidth) return;
+    var r = row.getBoundingClientRect();
+    var c = chip.getBoundingClientRect();
+    if (c.left < r.left) row.scrollLeft += c.left - r.left - 8;
+    else if (c.right > r.right) row.scrollLeft += c.right - r.right + 8;
+  }
+
+  // 切分类/分组后把标签区滚进视野。
+  // 手机竖屏时上方控件很高，标签区常被顶到屏幕外，不滚的话点分组看着像「没反应」。
+  // 桌面上若标签本就在视野内则不做任何滚动，避免无谓跳动。
+  function scrollTagsIntoView() {
+    if (!dom.tags || !dom.body) return;
+    setTimeout(function () {
+      var tagsRect = dom.tags.getBoundingClientRect();
+      var bodyRect = dom.body.getBoundingClientRect();
+      if (tagsRect.top >= bodyRect.top + 2 && tagsRect.bottom <= bodyRect.bottom - 2) return;
+      var anchor = dom.tags.previousElementSibling || dom.tags; // .tl-tags-head
+      var delta = anchor.getBoundingClientRect().top - bodyRect.top - 6;
+      var top = Math.max(0, dom.body.scrollTop + delta);
+      if (dom.body.scrollTo) dom.body.scrollTo({ top: top, behavior: "smooth" });
+      else dom.body.scrollTop = top;
+    }, 0);
   }
 
   function renderTags() {
@@ -1229,6 +1269,12 @@
     var done = function (base) {
       state.base = base;
       state.lib = mergeLibrary(state.base, state.custom);
+      // 词库来源署名（base.note 由服务端填：含上游项目与 GPL-3.0 说明）
+      if (dom.libNote) {
+        var note = base && base.note ? String(base.note) : "";
+        dom.libNote.textContent = note;
+        dom.libNote.title = note;
+      }
       // 修正选中项
       var cats = state.lib.categories;
       if (!cats.length) {
@@ -1251,18 +1297,31 @@
 
     if (state.base && !force) return done(state.base);
 
-    fetch(LIB_URL, { cache: "no-store" })
-      .then(function (r) {
+    function grab(url) {
+      return fetch(url, { cache: "no-store" }).then(function (r) {
         if (!r.ok) throw new Error("HTTP " + r.status);
-        return r.json();
-      })
-      .then(function (j) {
-        done(j);
-      })
+        return r.json().then(function (j) {
+          // 接口用 { ok:false, synced:false } 表示"词库没同步"，这不算成功
+          if (j && j.ok === false) throw new Error(j.error || "词库未同步");
+          return j;
+        });
+      });
+    }
+
+    // 先问服务端词库（真实 WeiLin 数据），拿不到再退回仓库自带的起始库。
+    // 两步都失败也要能用 —— 本地覆盖层照常工作。
+    grab(LIB_API_URL)
+      .then(done)
       .catch(function () {
-        // 词库文件缺失也要能用（本地覆盖层照常工作）
-        done({ version: 1, categories: [] });
-        toast("服务器词库未加载，仅显示本地新增标签");
+        return grab(LIB_FALLBACK_URL)
+          .then(function (j) {
+            done(j);
+            toast("服务端词库未同步，已回退到自带的起始库");
+          })
+          .catch(function () {
+            done({ version: 1, categories: [] });
+            toast("服务器词库未加载，仅显示本地新增标签");
+          });
       });
   }
 

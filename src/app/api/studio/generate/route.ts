@@ -14,7 +14,7 @@ import {
   studioImageExtension,
 } from "@/lib/studio";
 import { isGptImageModel, NAI_SIZE_MAP } from "@/lib/studio-presets";
-import { normalizeRefDataUri } from "@/lib/ref-image";
+import { normalizeRefDataUri, dataUriToBuffer } from "@/lib/ref-image";
 
 /** WxH → NAI 分档名（直连接口用）；已是分档名原样返回 */
 function reverseNaiSize(size: string): string {
@@ -145,11 +145,18 @@ export async function POST(req: NextRequest) {
       body.reference_mode === "img2img" || body.reference_mode === "director"
         ? body.reference_mode
         : "vibe";
+    // 参考图的"体重"与逐图参数：只看张数无法判断"到底传了什么"，
+    // 补上字节数 + 强度 + base_caption（对齐 AstrBot 的 ref_bytes 口径，便于两边对比）。
+    const refDetail = refList.length
+      ? ` 参考图字节=${refList.reduce((sum, s) => sum + (dataUriToBuffer(s)?.buf.length ?? 0), 0)}` +
+        ` 强度=[${refList.map((_, i) => Number(strengths[i]) || 0).join(",")}]` +
+        ` 描述=[${refList.map((_, i) => String(captions[i] ?? "") || "-").join(",")}]`
+      : "";
     // 生图台请求日志：上游调用过去完全无痕，出问题只能靠猜，这里补上关键上下文
     console.log(
       `[studio] 生成请求 user=${user.username} 后端=${backend} 模型=${model || "(默认)"} 尺寸=${actualSize || "(默认)"} n=${n} ` +
         `参考图=${refList.length}/${rawRefInput.length} 参考模式=${backend === "openai" ? refModeUsed : "-"} ` +
-        `上游=${safeHost(backend === "direct" ? cfg.direct.base_url : cfg.openai.base_url)}`,
+        `上游=${safeHost(backend === "direct" ? cfg.direct.base_url : cfg.openai.base_url)}${refDetail}`,
     );
 
     if (backend === "direct") {

@@ -148,16 +148,15 @@ export const DIRECTOR_CAPTIONS = ["character&style", "character", "style"];
 /** 参考图单次请求上限（§5.2） */
 export const MAX_REFERENCE_IMAGES = 8;
 
-/** 支持精准参考的 NAI 模型（4.5 / 5 全系），其余自动回退 4-5-full */
+/** 支持精准参考（director）的 NAI 模型。
+ *  注意：官方文档写的是 4.5/5 全系，但**上游中转实测只认 4.5 系列** ——
+ *  请求 5 系会返回 500「novelai adaptor: precise reference is only supported by NAI 4.5 models」。
+ *  所以这里不放行 5 系，非本表的模型一律回退 4-5-full（见 generateNaiOpenAi）。 */
 export const DIRECTOR_MODELS = new Set([
   "nai-diffusion-4-5-full",
   "nai-diffusion-4-5-curated",
   "nai45",
   "nai45-curated",
-  "nai-diffusion-5-full",
-  "nai-diffusion-5-curated",
-  "nai5",
-  "nai5-curated",
 ]);
 
 // ---- 风格预设（画师串，移植自 nai_image DEFAULT_ARTISTS） ----

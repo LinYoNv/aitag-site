@@ -304,6 +304,8 @@ systemctl reload <反代服务>    # 改反代配置后重载
 | `recalc-metadata.mjs` | 解析器升级后对存量作品重算 metadata（自动备份；`AITAG_DB` 指定库，`--dry-run` 预览） |
 | `test-parser.mjs` | ComfyUI 解析器冒烟测试：临时编译 `src/lib/png.ts` 后跑样例 workflow 断言 |
 | `warmup-images.mjs` | 图片缓存预热：扫描 DB 全部作品，预生成 thumb/preview 缓存（部署后跑一次；`--only-list` 只列 URL） |
+| `taglib-import.mjs` | 中文词库同步：把 WeiLin 词库（GPL-3.0）转成 `data/taglib.db` 供 `/api/studio/tags` 读取；`--download` 拉源库、`--emit-json` 另存 JSON。**产物不进 git**（`data/` 已忽略），部署脚本会单独拷到线上 |
+| `deploy-hk3.sh` | 生产部署：拉代码 → build → 同步 standalone/public/**词库 DB** → 重启 → 健康检查 |
 
 ### 测试（`tests/`）
 | 文件 | 用途 |
@@ -346,6 +348,14 @@ systemctl reload <反代服务>    # 改反代配置后重载
     - **openai**（api.syuan.org 等）：NAI 模型按 nai_image 契约——`/v1/images/generations` 顶层 `prompt/size/n/model/action` + `parameters{steps,scale,sampler,noise_schedule,seed,negative_prompt,reference_image_multiple,reference_strength_multiple,director_reference_*,use_coords,characterPrompts,v4_prompt}`，img2img 走 `/v1/images/edits`；尺寸契约 64 倍数/最大边 1920/面积 3686400（4K 档降级 2K）；参考图 ≤8 张，img2img 用 sharp 精确 cover 到目标尺寸、vibe/director 等比缩限；重试 408/429/502/503/504 + "稍后重试"类文案（2/4/8s 退避），超时不重试。gpt-image 模型（`gpt-image-*`）自动切换官方参数面：`quality/background/output_format`，参考图走 `/v1/images/edits` multipart `image[]`，NAI 参数自动忽略。
     - **密钥用户自配（2026-09-14 起）**：站点只提供默认 URL（`https://api.syuan.org` / `https://nai.sta1n.cn`，可在个人资料设置覆盖），每个用户在「个人资料设置 → 生图台密钥」填自己的 OpenAI Key / sta1n Token，生图消耗各自的额度。密钥服务端加密存 `users.studio_cfg`（`/api/me/studio` 与 `/api/studio/config` 一律不回显，GET 只给 `已配置/未配置` 状态；加密与密钥管理见本地运维文档）。未配置时生图返回 400 并引导去个人资料设置；`POST /api/me/studio` 支持 `probe_direct` 测试 sta1n Token（`POST /api/api/getUser`，响应体 `status:"error"` 视为无效）。
     - **结果入库**：结果卡「传到图库」走 `POST /api/upload`（b64→File + `meta_0` 带完整 prompt/参数，gpt-image 用 ai_type=other）。
+
+29. **中文提示词库（2026-09-14）**：面板「提示词组 / TAG LIBRARY」的数据源分两层——服务端词库优先，浏览器本地覆盖层（localStorage）叠加个人增删。
+    - **服务端**：`GET /api/studio/tags`（需登录）读 `data/taglib.db`，返回结构与 `public/studio/tags.default.json` 完全一致的分类树（当前 11 分类 / 132 分组 / 4086 标签），另提供 `?q=` 在 danbooru 中文表（2.2 万条带翻译）里补充检索，中英文都可搜。
+    - **产物来源**：`scripts/taglib-import.mjs` 从 WeiLin-Comfyui-Tools-panel 的中文词库（`userdatas_zh_CN.db`）同步。上游为 **GPL-3.0**，因此：**派生数据一律放 `data/`（已 gitignore），绝不进公开仓库**；面板底部署名出处。
+    - **健壮性要点**：① 源库 `tag_subgroups` 存在 `name` 为 NULL 的脏行（会撞目标表 `NOT NULL`，曾让整个导入以 `SQLITE_CONSTRAINT_NOTNULL(1299)` 失败）——无名字且无标签的空组跳过、有标签的用占位名保留，两者都打印出来；② danbooru 表 14 万行里只有 2.2 万行带中文，只导有翻译的（产物从 ~9MB 降到 1.5MB）；③ **词库未同步不报错**：接口返回 `ok:false, synced:false`，面板回退到自带起始库并提示，功能不中断。
+    - **部署**：`data/taglib.db` 不在 git 里，`scripts/deploy-hk3.sh` 会**单独原子拷**到线上 `data/`（只碰这一个文件，绝不覆盖同目录的 `aitag.db` / `studio.secret`），并在健康检查里校验。
+30. **精准参考（director）只支持 4.5 系（2026-09-14，实测）**：上游中转对 `director_reference_*` 的请求，**5 系模型会报 500**（`novelai adaptor: precise reference is only supported by NAI 4.5 models`），与官方文档「4.5/5 全系」不符。`DIRECTOR_MODELS` 白名单因此**只放行 4.5 系**，其余模型一律回退 `nai-diffusion-4-5-full` 并打日志（回退必须留痕，否则线上排查只能靠猜）。面板提示文案已同步更正。
+31. **参考模式与逐图强度（2026-09-14）**：`vibe`（氛围转移，默认强度 0.6，`information_extracted` 0.7）只迁移氛围/风格，**不保证人物一致性**；`director`（精准参考，默认强度 1.0、`base_caption` `character&style`）才保人物/服装。面板切换模式时会按新模式默认值刷新逐图强度，但**用户手改过的值保留**（判据：值仍等于上次自动套用值 `autoStrength` 即视为未定制）。生图请求日志已补 `参考图字节` / `强度[]` / `描述[]`，便于与 AstrBot 的 `ref_bytes` 口径对照。
 
 ---
 

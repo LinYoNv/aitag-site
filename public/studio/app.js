@@ -853,6 +853,27 @@
     return currentRefMode() === "director" ? defaultDirectorStrength : defaultVibeStrength;
   }
 
+  // 切换参考模式后刷新逐图强度：vibe 默认 0.6、director 默认 1.0。
+  // 判据是"值仍等于上次自动套用的默认值"（autoStrength）→ 说明用户没手改过，跟随模式；
+  // 否则视为用户定制过，原样保留（切模式不该悄悄抹掉用户填的数字）。
+  function syncRefStrengthsToMode() {
+    const next = defaultRefStrength();
+    let changed = 0;
+    referenceImages.forEach((item) => {
+      if (item.strength === item.autoStrength && item.strength !== next) {
+        item.strength = next;
+        changed += 1;
+      }
+      item.autoStrength = next;
+    });
+    if (changed > 0) {
+      console.log(
+        `[aitag Studio] 参考模式 ${currentRefMode()}：${changed} 张参考图的强度已随模式默认值改为 ${next}`,
+      );
+    }
+    return changed;
+  }
+
   function addRefImages(fileList) {
     let remaining = MAX_REF_IMAGES - referenceImages.length;
     Array.from(fileList || []).forEach((file) => {
@@ -863,11 +884,14 @@
       reader.onload = (e) => {
         const dataUrl = String(e.target.result || "");
         const comma = dataUrl.indexOf(",");
+        const strength = defaultRefStrength();
         referenceImages.push({
           b64: comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl,
           dataUrl,
           name: file.name || `image_${referenceImages.length + 1}`,
-          strength: defaultRefStrength(),
+          strength,
+          // 记录"当前自动套用的默认值"，供切模式时判断用户是否手改过
+          autoStrength: strength,
           caption: defaultDirectorCaption,
         });
         renderRefGrid();
@@ -1384,6 +1408,7 @@
     els.refRemove.addEventListener("click", clearReferenceImage);
     if (els.refMode) {
       els.refMode.addEventListener("change", () => {
+        syncRefStrengthsToMode();
         applyRefModeUI();
         renderRefGrid();
         saveCache();

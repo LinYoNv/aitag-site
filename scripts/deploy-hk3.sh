@@ -87,6 +87,19 @@ fi
 mkdir -p "$DEPLOY/scripts"
 [[ -f scripts/recalc-metadata.mjs ]] && cp scripts/recalc-metadata.mjs "$DEPLOY/scripts/" || true
 
+# ---------- 4b. 同步中文词库产物（不进 git，必须单独拷） ----------
+# data/taglib.db 由 `node scripts/taglib-import.mjs` 从 WeiLin 词库（GPL-3.0）生成，
+# data/ 整体在 .gitignore 里，所以它**不会随 git pull 到达**，漏拷会让面板静默退回起始库。
+# ⚠️ 只碰 taglib.db 这一个文件：同目录的 aitag.db 与 studio.secret 是生产数据，绝不覆盖。
+if [[ -f data/taglib.db ]]; then
+  mkdir -p "$DEPLOY/data"
+  cp -f data/taglib.db "$DEPLOY/data/taglib.db.new"
+  mv -f "$DEPLOY/data/taglib.db.new" "$DEPLOY/data/taglib.db"   # 原子替换，避免服务读到半个文件
+  log "同步词库 data/taglib.db（$(du -h data/taglib.db | cut -f1)）"
+else
+  warn "本地没有 data/taglib.db（词库未同步）→ 线上会回退到 public/studio/tags.default.json"
+fi
+
 # ---------- 5. 重启服务 ----------
 log "systemctl restart $SERVICE"
 systemctl restart "$SERVICE"
@@ -114,6 +127,14 @@ sleep 1
 check "首页（未登录 307 跳登录）" "http://127.0.0.1:$PORT/" "307"
 check "登录页" "http://127.0.0.1:$PORT/login" "200"
 check "生图台 iframe 面板" "http://127.0.0.1:$PORT/studio/index.html" "200"
+check "词库接口（未登录 401）" "http://127.0.0.1:$PORT/api/studio/tags" "401"
+
+# 词库产物是否真的到位（不在 git 里，最容易漏的一项）
+if [[ -f "$DEPLOY/data/taglib.db" ]]; then
+  printf '  ✅ %-34s %s\n' "词库 data/taglib.db" "$(du -h "$DEPLOY/data/taglib.db" | cut -f1)"
+else
+  printf '  ⚠️  %-34s %s\n' "词库 data/taglib.db 缺失" "面板会回退到起始库（功能可用，标签少）"
+fi
 
 # public 顶层条目逐个对齐：新增目录漏拷会在这里暴露
 missing=()

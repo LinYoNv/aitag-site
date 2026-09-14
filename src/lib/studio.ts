@@ -439,6 +439,8 @@ const OPENAI_MAX_RETRIES = 2;
 export const DEFAULT_NAI_OPENAI_MODEL = "nai-diffusion-4-5-full";
 export const DEFAULT_NAI_DIRECT_MODEL = "nai-diffusion-4-5-full";
 export const DEFAULT_GPTIMAGE_MODEL = "gpt-image-1";
+/** 精准参考的回退模型：上游只认 4.5 系列，非 4.5 的请求一律落到这里 */
+export const DIRECTOR_FALLBACK_MODEL = "nai-diffusion-4-5-full";
 
 export async function generateNaiOpenAi(cfg: ResolvedStudioCfg["openai"], input: NaiOpenAiInput): Promise<Buffer[]> {
   if (!cfg.base_url || !cfg.api_key) throw new StudioError("openai_not_configured");
@@ -495,9 +497,14 @@ export async function generateNaiOpenAi(cfg: ResolvedStudioCfg["openai"], input:
     if (Number.isFinite(noise)) parameters.noise = Math.min(1, Math.max(0, noise));
     payload.parameters = parameters;
   } else if (refData.uris.length > 0 && refMode === "director") {
-    // 精准参考仅支持 NAI 4.5 / 5 系列，其余自动回退（实测其他模型 400）
+    // 精准参考：上游实测只接受 4.5 系列。非 4.5（尤其 5 系）会被上游 500 拒绝，这里统一回退。
+    // 回退必须留日志 —— 静默改模型会让线上排查变成猜谜。
     if (!DIRECTOR_MODELS.has((model ?? "").toLowerCase())) {
-      model = "nai-diffusion-4-5-full";
+      console.log(
+        `[studio] 精准参考模型回退 ${model || "(默认)"} → ${DIRECTOR_FALLBACK_MODEL}` +
+          `（上游 precise reference 仅支持 NAI 4.5 系列）`,
+      );
+      model = DIRECTOR_FALLBACK_MODEL;
     }
     payload.model = model;
     payload.action = "generate";

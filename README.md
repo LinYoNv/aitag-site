@@ -37,6 +37,7 @@
 - **双后端**：NAI 直连（nai.sta1n.cn `GET /generate`，画师串独立 artist 参数、CFG Rescale）+ OpenAI 兼容（api.syuan.org `/v1/images/*`）
 - OpenAI 兼容下支持 **NAI 全系模型**（vibe/精准参考 ≤8 张逐图权重、img2img、director-tools 图片处理、多角色坐标、种子）与 **gpt-image 模型**（quality/background/output_format 官方参数面，参考图走 `/v1/images/edits` multipart）
 - 画师串风格预设 6 套 + 自定义；服务端权威合并 prompt；结果可下载或一键「传到图库」（自动带生成参数入库）
+- **中文提示词库**：面板「提示词组」分类/分组/标签云（11 分类 / 132 分组 / 4086 标签），支持中英文检索（含 2.2 万条 danbooru 中文补充），另有本地覆盖层可自增删；数据源为 WeiLin 词库（GPL-3.0，产物不进仓库，见「文档」）
 - **密钥用户自配**：在「个人资料设置 → 生图台密钥」填自己的 OpenAI 兼容 Key / sta1n Token（站点默认提供 api.syuan.org 与 nai.sta1n.cn 地址），消耗的是各自的额度；密钥存服务器、任何接口不回显，安全实现细节见本地运维文档
 - 不限次数：消耗用户自己的上游额度
 
@@ -61,23 +62,35 @@ npm test           # PNG 解析器单元测试（node:test + tsx）
 
 ## 部署（Linux 生产机）
 
-1. 本地：`npx tsc --noEmit && npx eslint src` 通过后提交推送 GitHub
-2. 服务器：`cd <源码目录> && git pull origin main && npx next build`
-3. 拷贝产物（⚠️ standalone 不含 static，必须单独拷；**node_modules 需整目录拷贝**，增量拷贝会破坏 sharp 等原生模块）：
-   ```bash
-   rm -rf <部署目录>/.next
-   cp -r .next/standalone/.next <部署目录>/.next
-   cp .next/standalone/server.js <部署目录>/server.js
-   rm -rf <部署目录>/node_modules
-   cp -r .next/standalone/node_modules <部署目录>/node_modules
-   mkdir -p <部署目录>/.next/static
-   cp -r .next/static/. <部署目录>/.next/static/
-   cp -r public/<新增静态目录> <部署目录>/public/   # ⚠️ public 不随 standalone 产物走,新增需手动同步
-   systemctl restart <服务名>
-   ```
-   ⚠️ **不要覆盖** `<部署目录>/data/`（数据库）与图片存储。
-4. 验证：`systemctl is-active <服务名> && curl -s -o /dev/null -w "%{http_code}" https://<站点域名>/login`
-   （登录页 200 即正常；接口均需登录，健康检查不要打 `/api/*`。服务名/域名/反代拓扑见本地运维文档）
+生产机上一键部署（推荐，内含构建 → 同步产物 → 重启 → 健康检查）：
+
+```bash
+cd <源码目录> && bash scripts/deploy-hk3.sh        # 拉取 main 并部署
+SKIP_PULL=1 bash scripts/deploy-hk3.sh             # 用当前工作区代码部署
+```
+
+脚本会处理 standalone 部署的几个坑：**node_modules 整目录拷贝**（增量拷会破坏 sharp 等原生模块）、
+`.next/static` 单独拷、`public/` 整体同步（standalone 产物**不含 public**，漏拷会 404）、
+**词库产物 `data/taglib.db` 单独原子拷**（见下），最后逐项健康检查。
+
+手工等价步骤：`git pull` → `NODE_OPTIONS="--max-old-space-size=1024" npx next build` → 拷 `.next/standalone/{.next,server.js,node_modules}` 与 `.next/static` → 同步 `public/` → `systemctl restart <服务名>`
+⚠️ **不要覆盖** `<部署目录>/data/`（数据库、密钥、词库）与 `public/images/`（用户图片）。
+
+### 中文词库（首次部署或换库时）
+
+`data/taglib.db` 由 WeiLin 词库（GPL-3.0）派生，**不在 git 里**，所以必须先放到源码目录再执行部署脚本：
+
+```bash
+npx --yes node@24 scripts/taglib-import.mjs        # 生成 data/taglib.db（需能访问 GitHub）
+# 或在本地生成后传上去：
+#   scp data/taglib.db <生产机>:<源码目录>/data/taglib.db
+```
+
+部署脚本发现它就会拷到 `<部署目录>/data/`（只碰这一个文件，绝不动同目录的 `aitag.db` / `studio.secret`）。
+**没放也不会坏**：接口返回 `synced:false`，面板自动回退到自带的 `public/studio/tags.default.json`。
+
+验证：`systemctl is-active <服务名> && curl -s -o /dev/null -w "%{http_code}" https://<站点域名>/login`
+（登录页 200 即正常；接口均需登录，健康检查不要打 `/api/*`。服务名/域名/反代拓扑见本地运维文档）
 
 ## API Token（外部插件上传）
 
