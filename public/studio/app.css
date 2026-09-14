@@ -1536,3 +1536,35 @@ body::before {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ===== 面板内联动作按钮（提示词组 / 清空 等）===== */
+.field-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  margin-right: 8px;
+  flex-wrap: wrap;
+}
+.btn-chip {
+  font-family: var(--font-tech);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  padding: 4px 11px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--edge-border-l2);
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--edge-ink-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.14s ease;
+}
+.btn-chip:hover {
+  background: var(--edge-signal);
+  border-color: var(--edge-ink-primary);
+  box-shadow: 0 2px 6px var(--edge-signal-glow);
+}
+.btn-chip:active { transform: translateY(1px); }
+.btn-chip.is-danger { border-color: rgba(255, 59, 48, 0.45); color: #a3221a; }
+.btn-chip.is-danger:hover { background: var(--edge-red); border-color: var(--edge-red); color: #fff; box-shadow: 0 2px 6px var(--edge-red-soft); }

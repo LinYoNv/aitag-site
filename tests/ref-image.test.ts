@@ -35,8 +35,8 @@ test("normalizeRefDataUri 接受裸 base64 并补出 data URI", () => {
   const raw = PNG.toString("base64");
   assert.equal(raw.startsWith("data:"), false);
   assert.equal(normalizeRefDataUri(raw), `data:image/png;base64,${raw}`);
-  assert.equal(normalizeRefDataUri(JPEG.toString("base64")).startsWith("data:image/jpeg;base64,"), true);
-  assert.equal(normalizeRefDataUri(WEBP.toString("base64")).startsWith("data:image/webp;base64,"), true);
+  assert.equal((normalizeRefDataUri(JPEG.toString("base64")) || "").startsWith("data:image/jpeg;base64,"), true);
+  assert.equal((normalizeRefDataUri(WEBP.toString("base64")) || "").startsWith("data:image/webp;base64,"), true);
 });
 
 test("normalizeRefDataUri 拒绝空值/非图片垃圾", () => {

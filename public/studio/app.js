@@ -30,6 +30,10 @@
     customArtists: $("customArtists"),
     negative: $("negative"),
     loadDefaultNegative: $("loadDefaultNegative"),
+    openTagLibBtn: $("openTagLibBtn"),
+    clearPromptBtn: $("clearPromptBtn"),
+    clearArtistsBtn: $("clearArtistsBtn"),
+    clearNegativeBtn: $("clearNegativeBtn"),
     generateBtn: $("generateBtn"),
     resetBtn: $("resetBtn"),
     tokenBadge: $("tokenBadge"),
@@ -1400,6 +1404,46 @@
       }
     });
     els.loadDefaultNegative.addEventListener("click", loadDefaultNegative);
+
+    // ===== 提示词组 / 清空按钮 =====
+    const openTagLibBtn = $("openTagLibBtn");
+    if (openTagLibBtn) {
+      openTagLibBtn.addEventListener("click", () => {
+        if (window.StudioTagLib) {
+          window.StudioTagLib.open({ textareaId: "naiPrompt" });
+        } else {
+          showError("提示词组编辑器未加载，请刷新页面重试。");
+        }
+      });
+    }
+    const clearPromptBtn = $("clearPromptBtn");
+    if (clearPromptBtn) {
+      clearPromptBtn.addEventListener("click", () => {
+        if (!els.naiPrompt.value.trim()) return studioToast("正向提示词本来就是空的");
+        els.naiPrompt.value = "";
+        saveCache();
+        studioToast("已清空正向提示词");
+      });
+    }
+    const clearArtistsBtn = $("clearArtistsBtn");
+    if (clearArtistsBtn) {
+      clearArtistsBtn.addEventListener("click", () => {
+        if (!els.customArtists.value.trim()) return studioToast("画师串本来就是空的");
+        els.customArtists.value = "";
+        saveCache();
+        studioToast("已清空自定义画师串");
+      });
+    }
+    const clearNegativeBtn = $("clearNegativeBtn");
+    if (clearNegativeBtn) {
+      clearNegativeBtn.addEventListener("click", () => {
+        if (!els.negative.value.trim()) return studioToast("反向提示词本来就是空的");
+        els.negative.value = "";
+        saveCache();
+        studioToast("已清空反向提示词（留空则用系统默认抑制词）");
+      });
+    }
+
     const goBtn = $("goProfileBtn");
     if (goBtn) goBtn.addEventListener("click", goProfile);
 
@@ -1421,6 +1465,15 @@
         }
       });
     });
+  }
+
+  // ===== 轻提示（复用提示词组编辑器的浮层；未加载时降级）=====
+  function studioToast(msg) {
+    if (window.StudioTagLib && window.StudioTagLib.toast) {
+      window.StudioTagLib.toast(msg);
+    } else {
+      console.log("[studio]", msg);
+    }
   }
 
   // ===== 初始化 =====

@@ -4,7 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>生图台 · 图像合成与测试终端</title>
-  <link rel="stylesheet" href="./app.css?v=1.2.2" />
+  <link rel="stylesheet" href="./app.css?v=1.3.0" />
+  <link rel="stylesheet" href="./taglib.css?v=1.3.0" />
 </head>
 <body>
   <!-- 终末地等高线动态地形 Canvas + 底部工业网格 -->
@@ -244,6 +245,14 @@
                 <label class="field-label" for="naiPrompt">
                   <span class="label-bracket">[</span>NAI 风格标签词<span class="label-bracket">]</span>
                 </label>
+                <div class="field-actions">
+                  <button id="openTagLibBtn" type="button" class="btn-chip">
+                    <span class="link-icon">◈</span> 提示词组
+                  </button>
+                  <button id="clearPromptBtn" type="button" class="btn-chip is-danger">
+                    <span class="link-icon">✕</span> 删除
+                  </button>
+                </div>
                 <span class="field-tech-tag">RAW_TAGS</span>
               </div>
               <div class="input-wrap">
@@ -469,7 +478,14 @@
             </div>
 
             <div id="customArtistsWrapper" class="field hidden">
-              <label class="field-label" for="customArtists">自定义画师与画质串</label>
+              <div class="field-header">
+                <label class="field-label" for="customArtists">自定义画师与画质串</label>
+                <div class="field-actions">
+                  <button id="clearArtistsBtn" type="button" class="btn-chip is-danger">
+                    <span class="link-icon">✕</span> 清空画师串
+                  </button>
+                </div>
+              </div>
               <div class="input-wrap">
                 <textarea
                   id="customArtists"
@@ -484,6 +500,11 @@
             <div class="field">
               <div class="field-header">
                 <label class="field-label" for="negative">负面抑制词 // NEGATIVE PROMPT</label>
+                <div class="field-actions">
+                  <button id="clearNegativeBtn" type="button" class="btn-chip is-danger">
+                    <span class="link-icon">✕</span> 清空反向词
+                  </button>
+                </div>
                 <button id="loadDefaultNegative" type="button" class="btn-link">
                   <span class="link-icon">⚡</span> 载入战术预置负面
                 </button>
@@ -614,6 +635,7 @@
     </main>
   </div>
 
-  <script src="./app.js?v=1.2.2"></script>
+  <script src="./taglib.js?v=1.3.0"></script>
+  <script src="./app.js?v=1.3.0"></script>
 </body>
 </html>

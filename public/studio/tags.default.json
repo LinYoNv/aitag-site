@@ -1,0 +1,231 @@
+{
+  "version": 1,
+  "name": "aitag 起始标签库",
+  "note": "框架自带的起始库，仅用于打通流程；正式词库由情绪提供，替换本文件即可（支持批量导入合并）。",
+  "categories": [
+    {
+      "id": "person",
+      "name": "人物",
+      "groups": [
+        { "id": "count", "name": "对象", "tags": [
+          { "name": "1girl", "zh": "单个女孩" }, { "name": "2girls", "zh": "两个女孩" },
+          { "name": "1boy", "zh": "单个男孩" }, { "name": "multiple girls", "zh": "多个女孩" },
+          { "name": "solo", "zh": "单人" }, { "name": "solo focus", "zh": "聚焦单人" }
+        ]},
+        { "id": "identity", "name": "身份", "tags": [
+          { "name": "student", "zh": "学生" }, { "name": "teacher", "zh": "教师" },
+          { "name": "knight", "zh": "骑士" }, { "name": "soldier", "zh": "士兵" },
+          { "name": "witch", "zh": "魔女" }, { "name": "idol", "zh": "偶像" },
+          { "name": "maid", "zh": "女仆" }, { "name": "nurse", "zh": "护士" }
+        ]},
+        { "id": "anime_char", "name": "二次元角色", "tags": [
+          { "name": "original", "zh": "原创角色" }, { "name": "oc", "zh": "原创角色缩写" },
+          { "name": "catgirl", "zh": "猫娘" }, { "name": "foxgirl", "zh": "狐娘" },
+          { "name": "elf", "zh": "精灵" }, { "name": "vampire", "zh": "吸血鬼" },
+          { "name": "angel", "zh": "天使" }, { "name": "demon girl", "zh": "恶魔女孩" }
+        ]},
+        { "id": "age", "name": "年龄", "tags": [
+          { "name": "child", "zh": "儿童" }, { "name": "teenager", "zh": "青少年" },
+          { "name": "young woman", "zh": "年轻女性" }, { "name": "adult", "zh": "成年人" },
+          { "name": "mature female", "zh": "成熟女性" }, { "name": "old woman", "zh": "老年女性" }
+        ]},
+        { "id": "skin", "name": "皮肤", "tags": [
+          { "name": "pale skin", "zh": "白皙肤色" }, { "name": "dark skin", "zh": "深色肤色" },
+          { "name": "tan", "zh": "小麦色" }, { "name": "glowing skin", "zh": "发光肌肤" },
+          { "name": "wet skin", "zh": "湿润肌肤" }, { "name": "skin fang", "zh": "小虎牙" }
+        ]},
+        { "id": "body", "name": "身材", "tags": [
+          { "name": "slender", "zh": "纤细" }, { "name": "petite", "zh": "娇小" },
+          { "name": "curvy", "zh": "曲线丰满" }, { "name": "muscular", "zh": "肌肉感" },
+          { "name": "thick thighs", "zh": "大腿丰满" }, { "name": "long legs", "zh": "长腿" }
+        ]},
+        { "id": "face", "name": "脸型", "tags": [
+          { "name": "sharp features", "zh": "轮廓分明" }, { "name": "round face", "zh": "圆脸" },
+          { "name": "freckles", "zh": "雀斑" }, { "name": "mole under eye", "zh": "眼下痣" },
+          { "name": "blush", "zh": "脸颊泛红" }
+        ]},
+        { "id": "hair", "name": "头发", "tags": [
+          { "name": "long hair", "zh": "长发" }, { "name": "short hair", "zh": "短发" },
+          { "name": "twintails", "zh": "双马尾" }, { "name": "ponytail", "zh": "单马尾" },
+          { "name": "braid", "zh": "辫子" }, { "name": "bob cut", "zh": "波波头" },
+          { "name": "silver hair", "zh": "银发" }, { "name": "black hair", "zh": "黑发" },
+          { "name": "blonde hair", "zh": "金发" }, { "name": "white hair", "zh": "白发" },
+          { "name": "gradient hair", "zh": "渐变发色" }, { "name": "hair between eyes", "zh": "眼间碎发" }
+        ]},
+        { "id": "eyes", "name": "眼睛", "tags": [
+          { "name": "blue eyes", "zh": "蓝眼" }, { "name": "red eyes", "zh": "红眼" },
+          { "name": "green eyes", "zh": "绿眼" }, { "name": "heterochromia", "zh": "异色瞳" },
+          { "name": "glowing eyes", "zh": "发光眼" }, { "name": "half-closed eyes", "zh": "半眯眼" },
+          { "name": "eyelashes", "zh": "睫毛" }, { "name": "detailed eyes", "zh": "精细眼睛" }
+        ]},
+        { "id": "mouth", "name": "嘴巴", "tags": [
+          { "name": "open mouth", "zh": "张嘴" }, { "name": "closed mouth", "zh": "闭嘴" },
+          { "name": "smile", "zh": "微笑" }, { "name": "grin", "zh": "咧嘴笑" },
+          { "name": "parted lips", "zh": "微启双唇" }, { "name": "tongue out", "zh": "吐舌" }
+        ]},
+        { "id": "ears", "name": "耳朵", "tags": [
+          { "name": "animal ears", "zh": "兽耳" }, { "name": "cat ears", "zh": "猫耳" },
+          { "name": "fox ears", "zh": "狐耳" }, { "name": "elf ears", "zh": "精灵耳" },
+          { "name": "earrings", "zh": "耳饰" }
+        ]},
+        { "id": "wings", "name": "翅膀", "tags": [
+          { "name": "wings", "zh": "翅膀" }, { "name": "angel wings", "zh": "天使之翼" },
+          { "name": "demon wings", "zh": "恶魔之翼" }, { "name": "feathered wings", "zh": "羽翼" },
+          { "name": "mechanical wings", "zh": "机械翼" }
+        ]}
+      ]
+    },
+    {
+      "id": "outfit",
+      "name": "服饰",
+      "groups": [
+        { "id": "outfit_main", "name": "服装", "tags": [
+          { "name": "dress", "zh": "连衣裙" }, { "name": "school uniform", "zh": "校服" },
+          { "name": "military uniform", "zh": "军装" }, { "name": "tactical jacket", "zh": "战术夹克" },
+          { "name": "hoodie", "zh": "连帽衫" }, { "name": "kimono", "zh": "和服" },
+          { "name": "suit", "zh": "西装" }, { "name": "coat", "zh": "大衣" },
+          { "name": "sweater", "zh": "毛衣" }, { "name": "armor", "zh": "铠甲" }
+        ]},
+        { "id": "outfit_leg", "name": "下装", "tags": [
+          { "name": "skirt", "zh": "短裙" }, { "name": "pleated skirt", "zh": "百褶裙" },
+          { "name": "pants", "zh": "长裤" }, { "name": "shorts", "zh": "短裤" },
+          { "name": "thighhighs", "zh": "过膝袜" }, { "name": "pantyhose", "zh": "丝袜" }
+        ]},
+        { "id": "outfit_acc", "name": "配饰", "tags": [
+          { "name": "glasses", "zh": "眼镜" }, { "name": "goggles", "zh": "护目镜" },
+          { "name": "necktie", "zh": "领带" }, { "name": "gloves", "zh": "手套" },
+          { "name": "choker", "zh": "颈饰" }, { "name": "hair ribbon", "zh": "发带" },
+          { "name": "scarf", "zh": "围巾" }, { "name": "hat", "zh": "帽子" },
+          { "name": "backpack", "zh": "背包" }, { "name": "headphones", "zh": "耳机" }
+        ]}
+      ]
+    },
+    {
+      "id": "expression",
+      "name": "表情动作",
+      "groups": [
+        { "id": "expr", "name": "表情", "tags": [
+          { "name": "happy", "zh": "开心" }, { "name": "sad", "zh": "悲伤" },
+          { "name": "angry", "zh": "生气" }, { "name": "surprised", "zh": "惊讶" },
+          { "name": "shy", "zh": "害羞" }, { "name": "serious", "zh": "严肃" },
+          { "name": "expressionless", "zh": "面无表情" }, { "name": "smug", "zh": "得意" }
+        ]},
+        { "id": "pose", "name": "姿势", "tags": [
+          { "name": "standing", "zh": "站立" }, { "name": "sitting", "zh": "坐姿" },
+          { "name": "lying", "zh": "躺姿" }, { "name": "kneeling", "zh": "跪姿" },
+          { "name": "crossed arms", "zh": "抱臂" }, { "name": "hand on hip", "zh": "手叉腰" },
+          { "name": "looking at viewer", "zh": "看向镜头" }, { "name": "looking away", "zh": "视线偏移" },
+          { "name": "arms up", "zh": "举手" }, { "name": "outstretched hand", "zh": "伸手" }
+        ]},
+        { "id": "action", "name": "动作", "tags": [
+          { "name": "running", "zh": "奔跑" }, { "name": "walking", "zh": "行走" },
+          { "name": "jumping", "zh": "跳跃" }, { "name": "fighting", "zh": "战斗" },
+          { "name": "holding sword", "zh": "持剑" }, { "name": "holding gun", "zh": "持枪" },
+          { "name": "hair blowing", "zh": "发丝飘动" }, { "name": "wind", "zh": "风" }
+        ]}
+      ]
+    },
+    {
+      "id": "composition",
+      "name": "画面",
+      "groups": [
+        { "id": "shot", "name": "构图", "tags": [
+          { "name": "portrait", "zh": "半身像" }, { "name": "upper body", "zh": "上半身" },
+          { "name": "full body", "zh": "全身" }, { "name": "close-up", "zh": "特写" },
+          { "name": "cowboy shot", "zh": "七分身" }, { "name": "from above", "zh": "俯视" },
+          { "name": "from below", "zh": "仰视" }, { "name": "from side", "zh": "侧面" }
+        ]},
+        { "id": "style_art", "name": "画风", "tags": [
+          { "name": "masterpiece", "zh": "杰作" }, { "name": "best quality", "zh": "最佳质量" },
+          { "name": "highly detailed", "zh": "高度精细" }, { "name": "anime style", "zh": "动漫风格" },
+          { "name": "watercolor", "zh": "水彩" }, { "name": "oil painting", "zh": "油画" },
+          { "name": "sketch", "zh": "素描" }, { "name": "flat color", "zh": "平涂上色" }
+        ]},
+        { "id": "light", "name": "光影", "tags": [
+          { "name": "cinematic lighting", "zh": "电影级光影" }, { "name": "soft lighting", "zh": "柔和光" },
+          { "name": "backlighting", "zh": "逆光" }, { "name": "rim light", "zh": "轮廓光" },
+          { "name": "god rays", "zh": "丁达尔光" }, { "name": "volumetric lighting", "zh": "体积光" },
+          { "name": "chiaroscuro", "zh": "明暗对照" }, { "name": "neon lights", "zh": "霓虹光" }
+        ]},
+        { "id": "quality_extra", "name": "质量强化", "tags": [
+          { "name": "absurdres", "zh": "超高分辨率" }, { "name": "ultra-detailed", "zh": "超精细" },
+          { "name": "intricate details", "zh": "繁复细节" }, { "name": "sharp focus", "zh": "锐利对焦" },
+          { "name": "depth of field", "zh": "景深" }, { "name": "bokeh", "zh": "背景虚化" }
+        ]}
+      ]
+    },
+    {
+      "id": "environment",
+      "name": "环境",
+      "groups": [
+        { "id": "weather", "name": "天气", "tags": [
+          { "name": "snow", "zh": "雪" }, { "name": "rain", "zh": "雨" },
+          { "name": "fog", "zh": "雾" }, { "name": "storm", "zh": "暴风雨" },
+          { "name": "sunny", "zh": "晴天" }, { "name": "cloudy sky", "zh": "多云" },
+          { "name": "night", "zh": "夜晚" }, { "name": "sunset", "zh": "日落" }
+        ]},
+        { "id": "time", "name": "时间", "tags": [
+          { "name": "day", "zh": "白天" }, { "name": "dusk", "zh": "黄昏" },
+          { "name": "dawn", "zh": "黎明" }, { "name": "midnight", "zh": "午夜" },
+          { "name": "golden hour", "zh": "黄金时刻" }
+        ]}
+      ]
+    },
+    {
+      "id": "scene",
+      "name": "场景",
+      "groups": [
+        { "id": "scene_place", "name": "地点", "tags": [
+          { "name": "city street", "zh": "城市街道" }, { "name": "ruins", "zh": "废墟" },
+          { "name": "industrial", "zh": "工业区" }, { "name": "forest", "zh": "森林" },
+          { "name": "beach", "zh": "海滩" }, { "name": "classroom", "zh": "教室" },
+          { "name": "bedroom", "zh": "卧室" }, { "name": "temple", "zh": "神殿" },
+          { "name": "snowfield", "zh": "雪原" }, { "name": "space station", "zh": "空间站" }
+        ]},
+        { "id": "scene_bg", "name": "背景", "tags": [
+          { "name": "simple background", "zh": "简洁背景" }, { "name": "white background", "zh": "白底" },
+          { "name": "dark background", "zh": "暗底" }, { "name": "gradient background", "zh": "渐变背景" },
+          { "name": "detailed background", "zh": "精细背景" }, { "name": "scenery", "zh": "风景" }
+        ]}
+      ]
+    },
+    {
+      "id": "object",
+      "name": "物品",
+      "groups": [
+        { "id": "item", "name": "道具", "tags": [
+          { "name": "sword", "zh": "剑" }, { "name": "katana", "zh": "武士刀" },
+          { "name": "gun", "zh": "枪械" }, { "name": "staff", "zh": "法杖" },
+          { "name": "book", "zh": "书本" }, { "name": "umbrella", "zh": "雨伞" },
+          { "name": "flowers", "zh": "花" }, { "name": "lantern", "zh": "灯笼" }
+        ]}
+      ]
+    },
+    {
+      "id": "camera",
+      "name": "镜头",
+      "groups": [
+        { "id": "lens", "name": "焦段", "tags": [
+          { "name": "wide shot", "zh": "广角" }, { "name": "telephoto", "zh": "长焦" },
+          { "name": "macro", "zh": "微距" }, { "name": "fisheye", "zh": "鱼眼" },
+          { "name": "dutch angle", "zh": "倾斜构图" }, { "name": "panorama", "zh": "全景" }
+        ]},
+        { "id": "motion", "name": "动态", "tags": [
+          { "name": "motion blur", "zh": "运动模糊" }, { "name": "action shot", "zh": "动作抓拍" },
+          { "name": "dynamic pose", "zh": "动感姿势" }, { "name": "speed lines", "zh": "速度线" }
+        ]}
+      ]
+    },
+    {
+      "id": "nsfw",
+      "name": "NSFW",
+      "groups": [
+        { "id": "nsfw_level", "name": "分级", "tags": [
+          { "name": "ecchi", "zh": "擦边" }, { "name": "suggestive", "zh": "性暗示" },
+          { "name": "revealing clothes", "zh": "暴露服饰" }, { "name": "swimsuit", "zh": "泳装" },
+          { "name": "lingerie", "zh": "内衣" }, { "name": "bikini", "zh": "比基尼" }
+        ]}
+      ]
+    }
+  ]
+}
