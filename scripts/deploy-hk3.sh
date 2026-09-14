@@ -29,6 +29,21 @@ die()  { printf '\033[31m[deploy:ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
 [[ -d "$DEPLOY" ]] || die "部署目录不存在：$DEPLOY"
 [[ -f "$DEPLOY/data/aitag.db" ]] || warn "部署目录里没有 data/aitag.db，确认这是不是生产目录？"
 
+# 记录脚本自身指纹：本脚本做 git pull，而 pull 可能把它自己更新掉。
+# bash 在启动时就把脚本读进来了，文件被换掉不会影响正在跑的这一次 ——
+# 结果是「新加的部署步骤静默不执行」（2026-09-14 词库同步就这么漏过一次：
+# 脚本里明明写了拷贝 data/taglib.db，跑完线上却没有，因为跑的仍是旧逻辑）。
+# 下面在第 1 步之后比对指纹，变了就用新版本重新执行。
+SELF="${BASH_SOURCE[0]}"
+self_sum() {
+  if command -v md5sum >/dev/null 2>&1; then
+    md5sum "$1" | awk '{print $1}'
+  else
+    cksum "$1" | awk '{print $1 "_" $2}'
+  fi
+}
+SELF_SUM_BEFORE="$(self_sum "$SELF")"
+
 # ---------- 1. 拉取代码 ----------
 cd "$REPO"
 if [[ "$SKIP_PULL" == "1" ]]; then
@@ -42,6 +57,14 @@ else
 fi
 COMMIT="$(git rev-parse --short HEAD)"
 log "部署提交：$COMMIT  $(git log -1 --pretty=%s)"
+
+# 脚本自身被本次 pull 更新了？→ 用新版本重跑，别拿旧逻辑部署。
+# DEPLOY_REEXEC 防重入（新版本再跑一次时不会再触发）。
+if [[ "$(self_sum "$SELF")" != "$SELF_SUM_BEFORE" && "${DEPLOY_REEXEC:-0}" != "1" ]]; then
+  warn "部署脚本自身在本次 pull 中被更新 → 改用新版本重新执行（否则新加的步骤会静默不生效）"
+  export DEPLOY_REEXEC=1
+  exec bash "$SELF" "$@"
+fi
 
 # ---------- 2. 构建 ----------
 log "next build（服务器内存小，必须限堆）"
