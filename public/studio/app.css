@@ -1162,117 +1162,6 @@ body::before {
   border-radius: var(--radius-md);
 }
 
-/* ===== 提示词转译流水线 (MERGE PIPELINE) ===== */
-.merge-info {
-  margin-bottom: var(--space-4);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--edge-border-glass);
-  border-left: 4px solid var(--edge-signal);
-  overflow: hidden;
-}
-
-.merge-info-header {
-  padding: 8px 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.merge-header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.merge-dot {
-  width: 6px;
-  height: 6px;
-  background: var(--edge-signal-dark);
-  border-radius: var(--radius-full);
-}
-
-.merge-title-text {
-  font-family: var(--font-tech);
-  font-size: 0.76rem;
-  font-weight: 900;
-  color: var(--edge-ink-primary);
-  letter-spacing: 0.04em;
-}
-
-.merge-tag {
-  font-family: var(--font-tech);
-  font-size: 0.66rem;
-  font-weight: 800;
-  color: #1e702e;
-  background: var(--edge-green-soft);
-  padding: 2px 10px;
-  border-radius: var(--radius-full);
-  border: 1px solid rgba(47, 158, 68, 0.4);
-}
-
-.merge-steps {
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.merge-step {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-}
-
-.merge-step-num {
-  flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  background: var(--edge-signal);
-  border: 1px solid var(--edge-ink-primary);
-  color: var(--edge-ink-primary);
-  font-family: var(--font-tech);
-  font-size: 0.74rem;
-  font-weight: 900;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-xs);
-  margin-top: 1px;
-}
-
-.merge-step-body {
-  flex: 1;
-  min-width: 0;
-}
-
-.merge-step-label {
-  font-family: var(--font-tech);
-  font-size: 0.72rem;
-  font-weight: 800;
-  color: var(--edge-ink-secondary);
-  margin-bottom: 2px;
-}
-
-.merge-step-value {
-  font-family: var(--font-tech);
-  font-size: 0.8rem;
-  color: var(--edge-ink-primary);
-  background: rgba(255, 255, 255, 0.88);
-  border: 1px solid var(--edge-border-glass);
-  border-radius: var(--radius-sm);
-  padding: 8px 14px;
-  word-break: break-all;
-  line-height: 1.5;
-}
-
-.merge-step-value.highlight {
-  background: #fffde0;
-  border: 1.5px solid var(--edge-signal-dark);
-  color: var(--edge-ink-primary);
-  font-weight: 700;
-  box-shadow: 0 2px 8px var(--edge-signal-glow);
-}
-
 /* ===== 图片渲染结果展示 (RESULT GRID & CARDS) ===== */
 .result-grid {
   display: grid;
@@ -1352,6 +1241,22 @@ body::before {
 .result-item:hover .result-item-actions {
   opacity: 1;
   transform: translateY(0);
+}
+
+/* 单图（成品图）模式：卡片居中 + 限高，整张图一屏内看完（点图片可看原尺寸） */
+.result-grid:not(.cols-2):not(.cols-4) {
+  justify-items: center;
+}
+
+.result-grid:not(.cols-2):not(.cols-4) .result-item {
+  width: fit-content;
+  max-width: 100%;
+}
+
+.result-grid:not(.cols-2):not(.cols-4) .result-item img {
+  width: auto;
+  max-width: 100%;
+  max-height: 68vh;
 }
 
 .result-item-action {

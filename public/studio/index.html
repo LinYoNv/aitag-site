@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>生图台 · 图像合成与测试终端</title>
-  <link rel="stylesheet" href="./app.css?v=1.2.1" />
+  <link rel="stylesheet" href="./app.css?v=1.2.2" />
 </head>
 <body>
   <!-- 终末地等高线动态地形 Canvas + 底部工业网格 -->
@@ -606,19 +606,7 @@
               </button>
             </div>
 
-            <!-- 合并步骤战术流 -->
-            <div id="mergeInfo" class="merge-info acrylic-card hidden">
-              <div class="merge-info-header acrylic-header">
-                <div class="merge-header-left">
-                  <span class="merge-dot"></span>
-                  <span class="merge-title-text">PROMPT TRANSFORMATION PIPELINE // 指令流转链路</span>
-                </div>
-                <span class="merge-tag">CHAIN.OK</span>
-              </div>
-              <div class="merge-steps" id="mergeSteps"></div>
-            </div>
-
-            <!-- 图片渲染结果网格 -->
+            <!-- 图片渲染结果网格（只显示成品图，不再展示提示词流转步骤） -->
             <div id="resultGrid" class="result-grid hidden"></div>
           </div>
         </div>
@@ -626,6 +614,6 @@
     </main>
   </div>
 
-  <script src="./app.js?v=1.2.1"></script>
+  <script src="./app.js?v=1.2.2"></script>
 </body>
 </html>

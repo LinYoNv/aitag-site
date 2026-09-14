@@ -14,6 +14,7 @@ import {
   studioImageExtension,
 } from "@/lib/studio";
 import { isGptImageModel, NAI_SIZE_MAP } from "@/lib/studio-presets";
+import { normalizeRefDataUri } from "@/lib/ref-image";
 
 /** WxH → NAI 分档名（直连接口用）；已是分档名原样返回 */
 function reverseNaiSize(size: string): string {
@@ -85,12 +86,22 @@ export async function POST(req: NextRequest) {
   const nlPrompt = String(body.nl_prompt ?? "").trim().slice(0, 8000);
   const negative = String(body.negative ?? "").trim().slice(0, 4000);
   const directorAction = String(body.director_action ?? "").trim();
-  const refList = Array.isArray(body.reference_image_b64_list)
-    ? body.reference_image_b64_list
-        .filter((s) => typeof s === "string" && s.startsWith("data:"))
-        // 单张 data URI ≤ 11MB 字符（约 8MB 二进制），防单请求占满内存
-        .filter((s) => s.length <= 11_000_000)
+  const rawRefInput = Array.isArray(body.reference_image_b64_list)
+    ? body.reference_image_b64_list.filter((s) => typeof s === "string")
     : [];
+  // 参考图入参：裸 base64 / data URI 都接受（旧面板只发裸串），归一化后统一成 data URI。
+  // 历史上这里用 startsWith("data:") 过滤，导致参考图被静默丢弃（生图退化成纯文生图）。
+  const refList = rawRefInput
+    .map((s) => normalizeRefDataUri(s))
+    .filter((s): s is string => Boolean(s))
+    // 单张 data URI ≤ 11MB 字符（约 8MB 二进制），防单请求占满内存
+    .filter((s) => s.length <= 11_000_000)
+    .slice(0, 8);
+  if (rawRefInput.length > 0 && refList.length === 0) {
+    console.warn(
+      `[studio] 参考图全部被丢弃：收到 ${rawRefInput.length} 张，归一化后 0 张（user=${user.username}）`,
+    );
+  }
 
   if (backend === "openai") {
     if (!naiPrompt && !nlPrompt && !directorAction) {
@@ -130,6 +141,16 @@ export async function POST(req: NextRequest) {
     let images: Buffer[];
     const actualSize = String(body.size ?? "");
     let fullPrompt = "";
+    const refModeUsed =
+      body.reference_mode === "img2img" || body.reference_mode === "director"
+        ? body.reference_mode
+        : "vibe";
+    // 生图台请求日志：上游调用过去完全无痕，出问题只能靠猜，这里补上关键上下文
+    console.log(
+      `[studio] 生成请求 user=${user.username} 后端=${backend} 模型=${model || "(默认)"} 尺寸=${actualSize || "(默认)"} n=${n} ` +
+        `参考图=${refList.length}/${rawRefInput.length} 参考模式=${backend === "openai" ? refModeUsed : "-"} ` +
+        `上游=${safeHost(backend === "direct" ? cfg.direct.base_url : cfg.openai.base_url)}`,
+    );
 
     if (backend === "direct") {
       // sta1n 直连：NAI 分档尺寸原样透传，画师串独立 artist 参数
@@ -225,6 +246,9 @@ export async function POST(req: NextRequest) {
       b64_json: buf.toString("base64"),
       ext: studioImageExtension(buf),
     }));
+    console.log(
+      `[studio] 生成完成 user=${user.username} 后端=${backend} 图片=${data.length} 参考图=${refList.length} 耗时=${Date.now() - started}ms`,
+    );
     return NextResponse.json({
       ok: true,
       data,
@@ -246,6 +270,10 @@ export async function POST(req: NextRequest) {
     });
   } catch (e) {
     if (e instanceof StudioError) {
+      console.warn(
+        `[studio] 上游报错 user=${user.username} 后端=${backend} 模型=${model || "(默认)"} 参考图=${refList.length} ` +
+          `reason=${e.reason} 耗时=${Date.now() - started}ms 详情=${e.message}`,
+      );
       return NextResponse.json(
         { error: formatGenerateError(e.reason), reason: e.reason },
         { status: e.reason === "timeout" ? 504 : 502 },
@@ -253,5 +281,14 @@ export async function POST(req: NextRequest) {
     }
     console.error("studio generate error:", e);
     return NextResponse.json({ error: "生图失败：服务器内部错误" }, { status: 500 });
+  }
+}
+
+/** 只取主机名，避免把用户密钥/查询串写进日志 */
+function safeHost(url: string | undefined): string {
+  try {
+    return new URL(String(url ?? "")).host || "(默认)";
+  } catch {
+    return "(默认)";
   }
 }

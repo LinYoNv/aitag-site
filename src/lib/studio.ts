@@ -8,6 +8,7 @@
 //  - direct 后端（nai.sta1n.cn）：GET /generate，响应为原始图片字节
 
 import "server-only";
+import { dataUriToBuffer, sniffMime } from "./ref-image";
 import { getUserStudioCfg, setUserStudioCfg, type UserStudioCfg } from "./db";
 import {
   NAI_SIZE_MAP,
@@ -246,27 +247,6 @@ export function formatGenerateError(reason: string): string {
 
 type RefImage = { dataUri: string; strength?: number; caption?: string };
 
-function dataUriToBuffer(dataUri: string): { buf: Buffer; mime: string } | null {
-  const m = /^data:([^;,]+);base64,([\s\S]+)$/i.exec(dataUri.trim());
-  if (!m) return null;
-  let buf: Buffer;
-  try {
-    buf = Buffer.from(m[2], "base64");
-  } catch {
-    return null;
-  }
-  if (!buf.length) return null;
-  return { buf, mime: m[1].toLowerCase() };
-}
-
-function sniffMime(buf: Buffer): string {
-  if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
-  if (buf.length > 12 && buf.subarray(0, 4).toString("ascii") === "RIFF" && buf.subarray(8, 12).toString("ascii") === "WEBP")
-    return "image/webp";
-  if (buf.length > 4 && buf.subarray(0, 4).toString("ascii") === "GIF8") return "image/gif";
-  return "image/png";
-}
-
 /**
  * NAI 参考图适配（对齐 nai_image _fit_ref_image）：
  *  - img2img：必须与目标尺寸严格一致（cover 裁切），否则上游直接拒绝
@@ -283,7 +263,10 @@ async function fitReferenceImages(
   const captions: string[] = [];
   for (const ref of refs) {
     const parsed = dataUriToBuffer(ref.dataUri);
-    if (!parsed) continue;
+    if (!parsed) {
+      console.warn("[studio] 参考图解析失败，已丢弃该张（data URI 格式异常）");
+      continue;
+    }
     let out = parsed.buf;
     try {
       const img = sharp(parsed.buf, { failOn: "none" });
@@ -628,7 +611,10 @@ export async function generateGptImage(cfg: ResolvedStudioCfg["openai"], input: 
     if (outputFormat) form.append("output_format", outputFormat);
     for (const ref of refs) {
       const parsed = dataUriToBuffer(ref.dataUri);
-      if (!parsed) continue;
+      if (!parsed) {
+        console.warn("[studio] gpt-image 参考图解析失败，已丢弃该张（data URI 格式异常）");
+        continue;
+      }
       const mime = sniffMime(parsed.buf);
       const ext = mime === "image/jpeg" ? "jpg" : mime === "image/webp" ? "webp" : mime === "image/gif" ? "gif" : "png";
       form.append("image[]", new Blob([new Uint8Array(parsed.buf)], { type: mime }), `reference_${Date.now()}_${form.get("image[]") ? refs.indexOf(ref) + 1 : 1}.${ext}`);

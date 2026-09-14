@@ -42,8 +42,6 @@
     errorMsg: $("errorMsg"),
     retryBtn: $("retryBtn"),
     resultGrid: $("resultGrid"),
-    mergeInfo: $("mergeInfo"),
-    mergeSteps: $("mergeSteps"),
     callFormat: $("callFormat"),
     callFormatHint: $("callFormatHint"),
     openaiConfigStatus: $("openaiConfigStatus"),
@@ -710,7 +708,8 @@
     if (body.call_format === "openai") {
       const refs = referenceImages;
       if (refs.length) {
-        body.reference_image_b64_list = refs.map((r) => r.b64);
+        // 发完整 data URI（服务端也兼容裸 base64，这里发规范形式）
+        body.reference_image_b64_list = refs.map((r) => r.dataUrl || r.b64);
       }
       const mode = els.refMode ? els.refMode.value : "vibe";
       if (els.refMode) {
@@ -1034,7 +1033,6 @@
     setLoading(true);
     hideError();
     hideResults();
-    hideMergeInfo();
 
     try {
       const resp = await apiPost("/api/studio/generate", body);
@@ -1044,10 +1042,7 @@
         throw new Error((resp && resp.error) || "上游未返回图片");
       }
 
-      if (resp.merge_info) {
-        displayMergeInfo(resp.merge_info);
-      }
-
+      // 提示词流转步骤不再展示（只出成品图）；merge_info 仍随结果保存，供“传到图库”写入生成参数
       displayResults(images, body, resp.meta || null, resp.merge_info || null);
     } catch (err) {
       const msg = err?.message || String(err);
@@ -1056,60 +1051,6 @@
       isGenerating = false;
       setLoading(false);
     }
-  }
-
-  // ===== 合并步骤展示 =====
-  function displayMergeInfo(info) {
-    hide(els.emptyState);
-    els.mergeSteps.innerHTML = "";
-
-    const steps = [];
-
-    if (info.artists) {
-      steps.push({ label: "画师串（预置风格 / 自定义，服务端合并）", value: info.artists });
-    }
-
-    if (info.nai_prompt) {
-      steps.push({ label: "NAI 风格提示词", value: info.nai_prompt });
-    }
-
-    if (info.nl_prompt) {
-      steps.push({ label: "自然语言提示词（不转译，直接拼接）", value: info.nl_prompt });
-    }
-
-    steps.push({ label: "完整 Prompt（发送至生图站点）", value: info.full_prompt, highlight: true });
-
-    steps.forEach((step, idx) => {
-      const row = document.createElement("div");
-      row.className = "merge-step";
-
-      const num = document.createElement("span");
-      num.className = "merge-step-num";
-      num.textContent = String(idx + 1);
-
-      const body = document.createElement("div");
-      body.className = "merge-step-body";
-
-      const label = document.createElement("div");
-      label.className = "merge-step-label";
-      label.textContent = step.label;
-
-      const value = document.createElement("div");
-      value.className = "merge-step-value" + (step.highlight ? " highlight" : "");
-      value.textContent = step.value;
-
-      body.appendChild(label);
-      body.appendChild(value);
-      row.appendChild(num);
-      row.appendChild(body);
-      els.mergeSteps.appendChild(row);
-    });
-
-    show(els.mergeInfo);
-  }
-
-  function hideMergeInfo() {
-    hide(els.mergeInfo);
   }
 
   // ===== UI 状态控制 =====
@@ -1130,7 +1071,6 @@
     hide(els.emptyState);
     hide(els.loadingState);
     hide(els.resultGrid);
-    hideMergeInfo();
     show(els.errorState);
     els.errorMsg.textContent = msg || "未知错误";
   }
@@ -1142,7 +1082,6 @@
   function hideResults() {
     hide(els.resultGrid);
     hide(els.resultMeta);
-    hideMergeInfo();
     show(els.emptyState);
   }
 
