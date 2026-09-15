@@ -403,6 +403,69 @@
 }
 .tl-foot .tl-spacer { flex: 1; }
 
+/* ---------- 已选提示词气泡 ---------- */
+/* 正向提示词里已有的词会拆成一个个小框列在这里，点 ✕ 直接删；没有词时整条隐藏 */
+.tl-picked {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--tl-line);
+  border-radius: 10px;
+  background: var(--tl-input-bg);
+}
+.tl-picked.is-empty { display: none; }
+.tl-picked-chips {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  align-content: flex-start;
+  gap: 6px;
+}
+.tl-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 2px 3px 2px 9px;
+  border: 1px solid var(--tl-line-strong);
+  border-radius: 999px;
+  background: var(--tl-raised);
+  font-family: var(--font-tech);
+  font-size: 0.75rem;
+  color: var(--tl-ink);
+}
+.tl-pick-txt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 24ch;
+}
+.tl-pick-x {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--tl-ink-faint);
+  font-size: 0.68rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.tl-pick-x:hover { background: var(--tl-red-soft); color: var(--tl-red); }
+.tl-picked-count {
+  flex: 0 0 auto;
+  padding-top: 3px;
+  font-family: var(--font-tech);
+  font-size: 0.72rem;
+  color: var(--tl-ink-faint);
+  white-space: nowrap;
+}
+
 /* 词库来源署名（WeiLin 词库为 GPL-3.0，出处需在界面上可见；完整文本放 title） */
 .tl-lib-note {
   font-size: 0.62rem;

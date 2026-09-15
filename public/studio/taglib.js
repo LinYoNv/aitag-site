@@ -50,8 +50,6 @@
     catId: null,
     groupId: null,
     query: "",
-    selected: {}, // 批量删除选择集：tagKey -> true
-    batchMode: false,
     prefs: null,
     built: false,
     target: null, // 目标 textarea
@@ -189,22 +187,64 @@
     }
     toast("已加入：" + name);
   }
-  function tagCountOf(v) {
-    return v
+  // 正向提示词按逗号拆成词条（面板与弹窗共用同一份文本）
+  function parseTags(v) {
+    return String(v || "")
       .split(",")
       .map(function (s) {
         return s.trim();
       })
-      .filter(Boolean).length;
+      .filter(Boolean);
+  }
+  function tagCountOf(v) {
+    return parseTags(v).length;
+  }
+  // 删掉第 idx 个词：按拆出来的顺序重建，不碰词条内容本身
+  function removeTagAt(idx) {
+    var tags = parseTags(readTarget());
+    if (idx < 0 || idx >= tags.length) return;
+    var name = tags[idx];
+    tags.splice(idx, 1);
+    writeTarget(tags.join(", "));
+    toast("已移除：" + name);
   }
   function updateCounter() {
-    if (!dom.counter) return;
     var v = readTarget();
-    dom.counter.textContent = tagCountOf(v) + " tags · " + v.length + " chars";
+    if (dom.counter) dom.counter.textContent = tagCountOf(v) + " tags · " + v.length + " chars";
+    renderPicked();
+  }
+
+  // 已选提示词气泡：把正向提示词拆成一个个小框（位置对齐 WeiLin 面板的同一区块），
+  // 每个框点 ✕ 单独删掉，不用回文本域里手工找词。空的时候整条隐藏，不给界面添噪音。
+  function renderPicked() {
+    if (!dom.picked || !dom.pickedChips) return;
+    var tags = parseTags(readTarget());
+    dom.picked.classList.toggle("is-empty", tags.length === 0);
+    if (dom.pickedCount) dom.pickedCount.textContent = tags.length ? tags.length + " 个词" : "";
+    // 词没变就不重建 DOM：否则每次敲键盘都会把滚动位置和焦点重置掉
+    var sig = tags.join("\u0001");
+    if (sig === pickedSig) return;
+    pickedSig = sig;
+    dom.pickedChips.innerHTML = "";
+    tags.forEach(function (name, idx) {
+      var chip = el("span", "tl-pick");
+      chip.title = name;
+      chip.appendChild(el("span", "tl-pick-txt", name));
+      var x = el("button", "tl-pick-x", "✕");
+      x.type = "button";
+      x.title = "从提示词中移除 " + name;
+      x.addEventListener("click", function () {
+        removeTagAt(idx);
+      });
+      chip.appendChild(x);
+      dom.pickedChips.appendChild(chip);
+    });
   }
 
   // ===== DOM 构建 =====
   var dom = {};
+  // 已选气泡上次渲染的内容签名：一样就不重建 DOM（保住滚动位置与焦点）
+  var pickedSig = "";
 
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -230,7 +270,7 @@
     head.appendChild(idx);
     var titleWrap = el("div", "tl-head-title");
     titleWrap.appendChild(document.createTextNode("提示词组 // TAG LIBRARY"));
-    titleWrap.appendChild(el("small", null, "单击标签写入提示词 · 编辑模式可禁用/删除"));
+    titleWrap.appendChild(el("small", null, "单击标签写入提示词 · 上方小框可单独移除已选词"));
     head.appendChild(titleWrap);
     head.appendChild(el("div", "tl-head-spacer"));
     var btnClose = el("button", "tl-close", "关闭");
@@ -251,22 +291,29 @@
     body.appendChild(taWrap);
 
     // 工具条
+    // 词库由服务端提供、不支持用户自行增删，所以这里只保留「对提示词本身的操作」。
+    // 「一键清空禁用 / 隐藏删除按钮」是编辑模式的配套控件，随编辑模式一并移除。
     var toolbar = el("div", "tl-toolbar");
-    var bClearDisabled = mkBtn("一键清空禁用", "⊘");
     var bClearAll = mkBtn("一键清空所有", "✕", "is-danger");
-    var bHideDelete = mkBtn("隐藏删除按钮", "◎");
     var bRandom = mkBtn("一键随机 Tag", "✦", "is-accent");
     var bRandomRule = mkBtn("设置随机 Tag 规则", "⚙");
     var bCopy = mkBtn("复制提示词")  // 不给图标：部分环境缺字形会显示成方框;
-    toolbar.appendChild(bClearDisabled);
     toolbar.appendChild(bClearAll);
-    toolbar.appendChild(bHideDelete);
     toolbar.appendChild(bRandom);
     toolbar.appendChild(bRandomRule);
     var tbRight = el("div", "tl-toolbar-right");
     tbRight.appendChild(bCopy);
     toolbar.appendChild(tbRight);
     body.appendChild(toolbar);
+
+    // 已选提示词气泡（WeiLin 面板同款位置：工具条下方、标签管理上方）
+    // 打开面板时正向提示词里已有的词会自动拆成小框，点 ✕ 快速删除
+    var picked = el("div", "tl-picked is-empty");
+    var pickedChips = el("div", "tl-picked-chips");
+    var pickedCount = el("div", "tl-picked-count");
+    picked.appendChild(pickedChips);
+    picked.appendChild(pickedCount);
+    body.appendChild(picked);
 
     // 标签管理区块
     var section = el("div", "tl-section");
@@ -284,10 +331,8 @@
     bRefresh.title = "刷新服务器词库";
     var search = el("input", "tl-input");
     search.placeholder = "搜索 Tag（英文或中文）...";
-    var bImport = mkBtn("批量导入 Tag", "⇪");
     searchRow.appendChild(bRefresh);
     searchRow.appendChild(search);
-    searchRow.appendChild(bImport);
     secBody.appendChild(searchRow);
 
     var prefsRow = el("div", "tl-search-row");
@@ -313,10 +358,6 @@
     tagsHead.appendChild(tagsTitle);
     tagsHead.appendChild(tagsCount);
     tagsHead.appendChild(el("span", "tl-spacer"));
-    var bEdit = mkBtn("编辑模式", "✎");
-    var bBatch = mkBtn("批量删除", "☑");
-    tagsHead.appendChild(bEdit);
-    tagsHead.appendChild(bBatch);
     secBody.appendChild(tagsHead);
 
     var tags = el("div", "tl-tags");
@@ -337,10 +378,8 @@
     libNote.title = "";
     foot.appendChild(libNote);
     foot.appendChild(el("div", "tl-spacer"));
-    var bAddTag = mkBtn("+ 添加 Tag", null, "is-accent");
     var bExport = mkBtn("导出 Tag", "⇩");
     var bApply = mkBtn("应用并关闭", null, "is-signal");
-    foot.appendChild(bAddTag);
     foot.appendChild(bExport);
     foot.appendChild(bApply);
     panel.appendChild(foot);
@@ -366,6 +405,9 @@
       section: section,
       caret: caret,
       libNote: libNote,
+      picked: picked,
+      pickedChips: pickedChips,
+      pickedCount: pickedCount,
     };
 
     // ===== 事件绑定 =====
@@ -381,6 +423,15 @@
     ta.addEventListener("input", function () {
       writeTarget(ta.value);
     });
+
+    // 反向同步：面板那一侧的正向提示词被改动时（例如点面板上的「删除」清空），
+    // 弹窗文本域与已选气泡也要跟着变 —— 只单向同步会让两边显示不一致。
+    if (state.target && state.target !== ta) {
+      state.target.addEventListener("input", function () {
+        if (dom.ta.value !== state.target.value) dom.ta.value = state.target.value;
+        updateCounter();
+      });
+    }
 
     secHead.addEventListener("click", function () {
       state.prefs.sectionCollapsed = !state.prefs.sectionCollapsed;
@@ -419,27 +470,12 @@
       toast("标签尺寸：" + { s: "小", m: "中", l: "大" }[state.prefs.tagSize]);
     });
 
-    bClearDisabled.addEventListener("click", function () {
-      var n = state.custom.disabledTags.length;
-      state.custom.disabledTags = [];
-      saveCustom();
-      renderTags();
-      toast(n ? "已清空 " + n + " 个禁用标签" : "没有禁用标签");
-    });
-
     bClearAll.addEventListener("click", function () {
       if (!readTarget().trim()) return toast("提示词本来就是空的");
       askConfirm("确认清空提示词？", "将清空当前提示词文本（画师串与反向词不受影响）。", function () {
         writeTarget("");
         toast("已清空提示词");
       });
-    });
-
-    bHideDelete.addEventListener("click", function () {
-      state.prefs.hideDelete = !state.prefs.hideDelete;
-      savePrefs();
-      renderTags();
-      toast(state.prefs.hideDelete ? "已隐藏删除按钮" : "已显示删除按钮");
     });
 
     bRandom.addEventListener("click", function () {
@@ -483,30 +519,6 @@
       return box;
     });
 
-    bImport.addEventListener("click", function () {
-      openImportDialog();
-    });
-
-    bEdit.addEventListener("click", function () {
-      state.prefs.editMode = !state.prefs.editMode;
-      savePrefs();
-      renderTags();
-      renderGroups();
-      toast(state.prefs.editMode ? "编辑模式：可禁用 / 删除标签" : "已退出编辑模式");
-    });
-
-    bBatch.addEventListener("click", function () {
-      state.batchMode = !state.batchMode;
-      state.selected = {};
-      renderTags();
-      bBatch.classList.toggle("is-on", state.batchMode);
-      toast(state.batchMode ? "批量删除：点击标签选择，再点「删除所选」" : "已退出批量删除");
-    });
-
-    bAddTag.addEventListener("click", function () {
-      openAddTagDialog();
-    });
-
     bExport.addEventListener("click", function () {
       exportLibrary();
     });
@@ -517,8 +529,6 @@
       copyText(v);
     });
 
-    var bAddCat = mkBtn("+ 添加分类", null);
-    bAddCat.classList.add("tl-add-chip");
     cats.dataset.addBtn = "1";
     state.built = true;
   }
@@ -561,22 +571,6 @@
       dom.cats.appendChild(b);
     });
     scrollChipIntoView(dom.cats, dom.cats.querySelector(".tl-cat.is-active"));
-    var add = mkBtn("+ 添加分类", null);
-    add.classList.add("tl-add-chip");
-    add.addEventListener("click", function () {
-      smallPrompt("添加分类", "分类名称（如：风格强化）", "", function (name) {
-        if (!name) return;
-        var id = uid("cat");
-        state.custom.categories.push({ id: id, name: name, groups: [] });
-        saveCustom();
-        state.lib = mergeLibrary(state.base, state.custom);
-        state.catId = id;
-        state.groupId = null;
-        renderAll();
-        toast("已添加分类：" + name);
-      });
-    });
-    dom.cats.appendChild(add);
   }
 
   function renderGroups() {
@@ -642,22 +636,6 @@
       dom.groups.appendChild(b);
     });
 
-    var addG = el("button", "tl-add-chip", "+ 添加分组");
-    addG.type = "button";
-    addG.addEventListener("click", function () {
-      smallPrompt("添加分组", "分组名称（如：发饰）", "", function (name) {
-        if (!name) return;
-        var gid = uid("grp");
-        var cc = findCustomCategory(c.id, true);
-        cc.groups.push({ id: gid, name: name, tags: [] });
-        saveCustom();
-        state.lib = mergeLibrary(state.base, state.custom);
-        state.groupId = gid;
-        renderAll();
-        toast("已添加分组：" + name);
-      });
-    });
-    dom.groups.appendChild(addG);
     scrollChipIntoView(dom.groups, dom.groups.querySelector(".tl-group-chip.is-active"));
   }
 
@@ -763,8 +741,8 @@
           "div",
           "tl-empty",
           state.query
-            ? "没有匹配的标签。可用「批量导入 Tag」补充词库。"
-            : "该分组暂无标签 —— 点下方「+ 添加 Tag」或用「批量导入 Tag」灌入。",
+            ? "没有匹配的标签。换个关键词，或点搜索框左边的 ⟳ 刷新词库。"
+            : "该分组暂无标签。",
         ),
       );
       return;
@@ -772,24 +750,15 @@
 
     items.forEach(function (it) {
       var t = it.tag;
-      var key = it.cat.id + "/" + it.group.id + "/" + t.name;
-      var chip = el("span", "tl-tag" + (isDisabled(t.name) ? " is-disabled" : "") + (state.selected[key] ? " is-selected" : ""));
+      var chip = el("span", "tl-tag" + (isDisabled(t.name) ? " is-disabled" : ""));
       chip.title = t.name + (t.zh ? " · " + t.zh : "");
       chip.appendChild(document.createTextNode(t.name));
       if (t.zh) chip.appendChild(el("span", "tl-tag-zh", t.zh));
 
-      if (state.batchMode) {
-        chip.addEventListener("click", function () {
-          if (state.selected[key]) delete state.selected[key];
-          else state.selected[key] = { catId: it.cat.id, groupId: it.group.id, name: t.name, label: t.name };
-          chip.classList.toggle("is-selected", !!state.selected[key]);
-          updateBatchBtn();
-        });
-      } else {
-        chip.addEventListener("click", function () {
-          insertTag(t.name);
-        });
-      }
+      // 词库只读：单击即写入提示词（批量删除已随用户编辑入口一并移除）
+      chip.addEventListener("click", function () {
+        insertTag(t.name);
+      });
 
       if (state.prefs.editMode) {
         var ops = el("span", "tl-tag-ops");
@@ -836,64 +805,11 @@
     });
   }
 
-  function updateBatchBtn() {
-    var n = Object.keys(state.selected).length;
-    var btn = document.getElementById("tlBatchDeleteBtn");
-    if (!btn) return;
-    btn.textContent = n ? "删除所选 (" + n + ")" : "退出批量删除";
-  }
-
-  function renderBatchBar() {
-    var foot = dom.overlay.querySelector(".tl-foot");
-    var exist = document.getElementById("tlBatchDeleteBtn");
-    if (state.batchMode && !exist) {
-      var b = mkBtn("退出批量删除", null, "is-danger");
-      b.id = "tlBatchDeleteBtn";
-      b.addEventListener("click", function () {
-        var keys = Object.keys(state.selected);
-        if (!keys.length) {
-          state.batchMode = false;
-          renderTags();
-          renderBatchBar();
-          return;
-        }
-        askConfirm("删除所选 " + keys.length + " 个标签？", "仅影响本机词库视图，可通过清除本地词库数据恢复。", function () {
-          keys.forEach(function (k) {
-            var it = state.selected[k];
-            var moved = false;
-            var cc = findCustomCategory(it.catId);
-            if (cc) {
-              cc.groups.forEach(function (g) {
-                if (g.id !== it.groupId) return;
-                var before = g.tags.length;
-                g.tags = g.tags.filter(function (x) {
-                  return x.name !== it.name;
-                });
-                if (g.tags.length !== before) moved = true;
-              });
-            }
-            if (!moved) state.custom.deletedTags.push(k);
-          });
-          saveCustom();
-          state.lib = mergeLibrary(state.base, state.custom);
-          state.selected = {};
-          state.batchMode = false;
-          renderAll();
-          toast("已删除所选标签");
-        });
-      });
-      foot.insertBefore(b, foot.firstChild.nextSibling);
-    } else if (!state.batchMode && exist) {
-      exist.remove();
-    }
-  }
-
   function renderAll() {
     renderSection();
     renderCats();
     renderGroups();
     renderTags();
-    renderBatchBar();
     updateCounter();
   }
 
@@ -985,12 +901,6 @@
     return wrap;
   }
 
-  function smallPrompt(title, label, value, cb) {
-    miniDialog(title, [{ key: "v", label: label, value: value }], function (v) {
-      cb((v.v || "").trim());
-    });
-  }
-
   function askConfirm(title, desc, cb) {
     miniDialog(title, desc ? [{ key: "d", label: desc, type: "text", value: "" }] : [], function () {
       cb();
@@ -1007,212 +917,6 @@
         d.replaceWith(p);
       }
     }
-  }
-
-  function openImportDialog() {
-    var cat = currentCategory();
-    var content = el("div");
-    content.style.cssText = "display:flex;flex-direction:column;gap:8px";
-    var hints = el(
-      "div",
-      null,
-      "支持：JSON（{categories:[…]} / [{name,zh}] / {tag:中文}）或每行一条「tag, 中文」。导入到当前分类的指定分组。",
-    );
-    hints.style.cssText = "font:400 11.5px/1.5 system-ui;color:#6e726b";
-    content.appendChild(hints);
-
-    var file = document.createElement("input");
-    file.type = "file";
-    file.accept = ".json,.txt,.csv";
-    content.appendChild(file);
-
-    var targetSel = document.createElement("select");
-    targetSel.className = "tl-input";
-    (cat ? cat.groups : []).forEach(function (g) {
-      var o = document.createElement("option");
-      o.value = g.id;
-      o.textContent = "导入到分组：" + g.name;
-      if (g.id === state.groupId) o.selected = true;
-      targetSel.appendChild(o);
-    });
-    var novo = document.createElement("option");
-    novo.value = "__new";
-    novo.textContent = "新建分组：导入_" + new Date().toISOString().slice(0, 10);
-    targetSel.appendChild(novo);
-    content.appendChild(targetSel);
-
-    var wrap = miniDialog(
-      "批量导入 Tag",
-      [{ key: "text", label: "粘贴内容", type: "textarea", value: "", placeholder: '例如：\n1girl, 一个女孩\nlong hair, 长发' }],
-      function (v) {
-        var text = v.text || "";
-        if (!text.trim()) {
-          toast("没有可导入的内容");
-          return false;
-        }
-        var res = importText(text, targetSel.value);
-        toast(res.added ? "已导入 " + res.added + " 个标签" : "没有解析到标签");
-      },
-      { content: content },
-    );
-
-    file.addEventListener("change", function () {
-      var f = file.files && file.files[0];
-      if (!f) return;
-      var r = new FileReader();
-      r.onload = function () {
-        var ta = wrap.querySelector("textarea");
-        if (ta) ta.value = String(r.result || "");
-      };
-      r.readAsText(f, "utf-8");
-    });
-  }
-
-  function importText(text, targetGroupId) {
-    var cat = currentCategory();
-    if (!cat) return { added: 0 };
-    var pairs = parseImport(text);
-    if (!pairs.length) return { added: 0 };
-
-    var gid = targetGroupId;
-    var cc = findCustomCategory(cat.id, true);
-    var group = null;
-    if (gid === "__new") {
-      gid = uid("grp");
-      group = { id: gid, name: "导入_" + new Date().toISOString().slice(0, 10), tags: [] };
-      cc.groups.push(group);
-    } else {
-      // 找到（或镜像）目标分组
-      var baseGroup = null;
-      var c = currentCategory();
-      for (var i = 0; i < c.groups.length; i++) if (c.groups[i].id === gid) baseGroup = c.groups[i];
-      for (var j = 0; j < cc.groups.length; j++) if (cc.groups[j].id === gid) group = cc.groups[j];
-      if (!group) {
-        group = { id: gid, name: baseGroup ? baseGroup.name : "导入", tags: [] };
-        cc.groups.push(group);
-      }
-    }
-
-    var added = 0;
-    pairs.forEach(function (p) {
-      if (!p.name) return;
-      var exists = group.tags.some(function (x) {
-        return x.name === p.name;
-      });
-      if (exists) return;
-      group.tags.push({ name: p.name, zh: p.zh || "" });
-      added++;
-    });
-    saveCustom();
-    state.lib = mergeLibrary(state.base, state.custom);
-    state.groupId = gid;
-    renderAll();
-    return { added: added };
-  }
-
-  function parseImport(text) {
-    var s = String(text || "").trim();
-    if (!s) return [];
-    // 1) JSON
-    if (s[0] === "{" || s[0] === "[") {
-      try {
-        var j = JSON.parse(s);
-        var out = [];
-        var pushTag = function (name, zh) {
-          if (!name) return;
-          out.push({ name: String(name).trim(), zh: String(zh || "").trim() });
-        };
-        if (Array.isArray(j)) {
-          j.forEach(function (it) {
-            if (typeof it === "string") pushTag(it, "");
-            else pushTag(it.name || it.tag || it.en, it.zh || it.cn || it.chinese);
-          });
-        } else if (j.categories) {
-          j.categories.forEach(function (c) {
-            (c.groups || []).forEach(function (g) {
-              (g.tags || []).forEach(function (t) {
-                pushTag(t.name || t, t.zh || t.cn || "");
-              });
-            });
-          });
-        } else {
-          Object.keys(j).forEach(function (k) {
-            pushTag(k, typeof j[k] === "string" ? j[k] : "");
-          });
-        }
-        return out;
-      } catch (e) {
-        /* 落到纯文本解析 */
-      }
-    }
-    // 2) 逐行
-    var cjk = /[\u3400-\u9fff]/;
-    return s
-      .split(/\r?\n/)
-      .map(function (line) {
-        return line.trim();
-      })
-      .filter(Boolean)
-      .map(function (line) {
-        var parts = line.split(/[,\t|;]+/).map(function (x) {
-          return x.trim();
-        });
-        var a = parts[0] || "";
-        var b = parts[1] || "";
-        if (cjk.test(a) && !cjk.test(b)) return { name: b, zh: a }; // 中文在前
-        return { name: a, zh: b };
-      })
-      .filter(function (p) {
-        return p.name;
-      });
-  }
-
-  function openAddTagDialog() {
-    var cat = currentCategory();
-    if (!cat) return;
-    miniDialog(
-      "添加 Tag",
-      [
-        { key: "name", label: "标签（英文，NAI/SD 语法）", value: "" },
-        { key: "zh", label: "中文说明（可选）", value: "" },
-        {
-          key: "group",
-          label: "所属分组",
-          type: "select",
-          value: state.groupId === "__all" ? (cat.groups[0] || {}).id : state.groupId,
-          options: (cat.groups || []).map(function (g) {
-            return { v: g.id, t: g.name };
-          }),
-        },
-      ],
-      function (v) {
-        var name = (v.name || "").trim();
-        if (!name) return false;
-        var gid = v.group;
-        var cc = findCustomCategory(cat.id, true);
-        var group = null;
-        for (var i = 0; i < cc.groups.length; i++) if (cc.groups[i].id === gid) group = cc.groups[i];
-        if (!group) {
-          var baseGroup = null;
-          for (var j = 0; j < cat.groups.length; j++) if (cat.groups[j].id === gid) baseGroup = cat.groups[j];
-          group = { id: gid, name: baseGroup ? baseGroup.name : "新增", tags: [] };
-          cc.groups.push(group);
-        }
-        if (
-          group.tags.some(function (x) {
-            return x.name === name;
-          })
-        ) {
-          toast("该分组已有此标签");
-          return false;
-        }
-        group.tags.push({ name: name, zh: (v.zh || "").trim() });
-        saveCustom();
-        state.lib = mergeLibrary(state.base, state.custom);
-        renderAll();
-        toast("已添加标签：" + name);
-      },
-    );
   }
 
   function exportLibrary() {
@@ -1338,8 +1042,11 @@
     Object.keys(dp).forEach(function (k) {
       if (state.prefs[k] === undefined) state.prefs[k] = dp[k];
     });
-    state.selected = {};
-    state.batchMode = false;
+    // 词库由服务端提供、不支持用户自行增删 —— 编辑模式已从界面移除。
+    // 这里强制关掉：老用户 localStorage 里可能还留着 editMode:true，
+    // 否则会渲染出「禁用/删除」按钮，而界面上已经没有开关能关掉它们了。
+    state.prefs.editMode = false;
+    state.prefs.hideDelete = false;
 
     build();
     dom.search.value = "";
