@@ -2,7 +2,7 @@
 
 > 本文档描述项目**当前实际状态**（与源码一致），是功能/文件/API 的权威参考。
 > 配套文档：`HANDOFF.md`（部署交接）、`ENVIRONMENT-NOTES.md`（环境备忘）、`login-register-progress.md`（登录注册线进度）。
-> 最后更新：2026-09-14（含生图台）
+> 最后更新：2026-09-18（含生图台、昵称修改）
 
 ---
 
@@ -65,8 +65,9 @@ systemctl reload <反代服务>    # 改反代配置后重载
 | 上传 | 3 种方式（NAI/ComfyUI/无参数），上传时可编辑完整参数；**PNG 唯一真相源**（后端权威解析）+ **内容去重**（SHA-256，相同图只存一份文件） | `/upload` |
 | 删除作品 | 管理员删全部；作者删自己的；顺带删图片文件 | 详情页按钮 |
 | 头像下拉菜单 | 头部最右圆形头像（可上传/默认图标），点击弹出【我的主页】【个人资料设置】【登出】；**黄色「管理员」徽标仅 admin 可见** | 头部 |
-| 个人资料 | 更换头像（PNG/JPG/WebP ≤2MB）+ 用户名/角色/昵称/注册时间 + **修改密码** + API Token 管理 + **生图台密钥**（OpenAI 兼容 Key / sta1n Token，站点只默认提供 URL） + **R18G 屏蔽偏好** | `/profile` |
-| 用户主页 | 参照 Pixiv：头像/用户名/管理员徽章/注册时间资料卡 + 统计行（作品/点赞/收藏/浏览）+ **作品\|收藏 Tab 滑块** | `/u/[username]` |
+| 个人资料 | 更换头像（PNG/JPG/WebP ≤2MB）+ 用户名/角色/昵称/注册时间 + **修改昵称** + **修改密码** + API Token 管理 + **生图台密钥**（OpenAI 兼容 Key / sta1n Token，站点只默认提供 URL） + **R18G 屏蔽偏好** | `/profile` |
+| 修改昵称 | 昵称 = 作品作者名（详情页/画廊卡片/用户主页显示的值）；登录用户名不变、无需重新登录；改名同事务同步本人**全部作品**的作者名；2-30 字符（字母数字下划线中文），不可与他人用户名或昵称重复，保留名与泛用作者名（群友/匿名/游客/guest）禁用；限流 5 次/小时 | `/profile` |
+| 用户主页 | 参照 Pixiv：头像/昵称/管理员徽章/注册时间资料卡 + 统计行（作品/点赞/收藏/浏览）+ **作品\|收藏 Tab 滑块**；`/u/[handle]` 的 handle 支持**用户名或昵称**（详情页作者链接用的是昵称） | `/u/[handle]` |
 | API Token | 账号绑定凭证，供外部插件走接口上传鉴权；明文只显示一次，库里存 SHA-256 哈希；可重新生成（旧的立即失效） | `/profile` |
 | R18G 屏蔽 | 用户级内容屏蔽：分组中英对照勾选（粪便/排尿/兽人/血腥/吞噬）+ 自定义词，只匹配**正向 prompt 词边界**；画廊与用户主页列表均生效 | `/profile` |
 | 生图台 | 在线生图：NAI 直连（nai.sta1n.cn GET）+ OpenAI 兼容（syuan `/v1/images/*`，NAI 全系 + gpt-image）；**密钥用户自配**（个人资料设置，站点只提供默认 URL）；参考图（vibe/精准/img2img）、director-tools、多角色坐标、风格画师串预设、结果下载/传图库；UI 移植自 nai_image test-panel | `/studio` |
@@ -84,8 +85,8 @@ systemctl reload <反代服务>    # 改反代配置后重载
 **权限规则**：
 - `requireLogin()`（`src/lib/guard.ts`）：未登录 `redirect('/login')` —— 所有页面 + 部分 API
 - `/api/works`（列表）**不要求登录**（页面层已门控，可接受）
-- `/api/upload`：**session 或 API Token 二选一**，作者=账号（session=登录用户名；token=绑定账号，忽略表单 author_name）
-- `DELETE /api/works/[id]`：admin 可删全部；否则 `author_name === username` 才可删，越权 403
+- `/api/upload`：**session 或 API Token 二选一**，作者=账号（取账号**昵称**，未设昵称时回退登录用户名；忽略表单 author_name）
+- `DELETE /api/works/[id]`：admin 可删全部；否则作品作者名命中本人**昵称或登录用户名**才可删（`isOwnAuthorName`，改名后不丢权限），越权 403
 
 ---
 
@@ -103,6 +104,7 @@ systemctl reload <反代服务>    # 改反代配置后重载
 | GET | `/api/me/token` | 登录 | — | 200 `{ok,hasToken:boolean}`（**不返回明文**） |
 | POST | `/api/me/token` | 登录 | — | 200 `{ok,token}`（生成/重置，明文仅此一次；旧 token 立即失效） |
 | POST | `/api/me/password` | 登录 | JSON `{old_password, new_password}` | 200 `{ok:true}`；403 旧密码错误；400 新密码<8 位或与旧密码相同 |
+| POST | `/api/me/nickname` | 登录 | JSON `{nickname}`（2-30 字符，字母/数字/下划线/中文） | 200 `{ok,user}`（昵称即作品作者名，同事务同步本人全部作品作者名）；400 格式/保留名/重名；429 限流 5 次/小时 |
 | GET | `/api/me/pref` | 登录 | — | 200 `{ok,pref:{enabled,selected,custom}}`（R18G 屏蔽偏好） |
 | POST | `/api/me/pref` | 登录 | JSON `{pref}`；selected 仅接受词表 tag 英文名，custom 每词 ≤40 字符 | 200 `{ok,pref}`（返回保存后的完整偏好） |
 | GET | `/api/studio/config` | 登录 | — | 200 当前用户密钥状态（脱敏）+ 默认 URL + 模型列表；**绝不含完整密钥** |
@@ -155,8 +157,8 @@ systemctl reload <反代服务>    # 改反代配置后重载
 | `/login` `/register` | 动态 | 已登录访问则 redirect `/` |
 | `/upload` | 动态 | 上传页（requireLogin） |
 | `/i/[id]` | 动态 | 详情页（requireLogin + canDelete/isAdmin） |
-| `/profile` | 动态 | 个人资料（requireLogin）：换头像 + 信息 + 修改密码 + API Token + **生图台密钥** + R18G 屏蔽偏好 |
-| `/u/[username]` | 动态 | 用户主页（requireLogin，参照 Pixiv）：资料卡 + 统计 + 作品\|收藏 Tab |
+| `/profile` | 动态 | 个人资料（requireLogin）：换头像 + 信息 + **修改昵称** + 修改密码 + API Token + **生图台密钥** + R18G 屏蔽偏好 |
+| `/u/[handle]` | 动态 | 用户主页（requireLogin，参照 Pixiv）：资料卡 + 统计 + 作品\|收藏 Tab；handle 支持**用户名或昵称**（`getUserByHandle`） |
 | `/studio` | 动态 | 生图台入口（requireLogin）：全屏内嵌 `public/studio/index.html` 面板（独立静态页，API 层走 `/api/studio/*`） |
 
 ---
@@ -172,7 +174,7 @@ systemctl reload <反代服务>    # 改反代配置后重载
 | ai_type | TEXT | sd/nai/nai_x/comfyui/other |
 | image_count | INTEGER | 图数 |
 | tags | TEXT(JSON) | 标签数组 |
-| author_name | TEXT | 作者（上传=账号用户名/昵称） |
+| author_name | TEXT | 作者名 = 上传时账号**昵称**（未设昵称回退登录用户名）；账号改昵称时**级联更新** |
 | total_view / total_bookmarks / total_likes | INTEGER | 浏览/收藏/点赞数 |
 | images | TEXT(JSON) | 图片 URL 数组（`/api/images/...` 或 `/images/works/...`） |
 | metadata | TEXT(JSON) | 生成参数 |
@@ -195,7 +197,7 @@ systemctl reload <反代服务>    # 改反代配置后重载
 | username | TEXT UNIQUE | 登录名 |
 | password_hash | TEXT | scrypt `salt:hash`（64 字节 hex，恒定时间比较） |
 | role | TEXT | `admin` \| `user` |
-| author_name | TEXT | 昵称 |
+| author_name | TEXT | 昵称（= 作品作者名；`/profile` 可修改，改名与 works.author_name 同步在同一事务内） |
 | avatar | TEXT | 头像 URL（`/api/avatars/...`，空=默认图标） |
 | create_date | TEXT | ISO |
 | api_token_hash | TEXT | API Token 的 SHA-256 哈希（**不存明文**；空=未生成） |
@@ -243,7 +245,7 @@ systemctl reload <反代服务>    # 改反代配置后重载
 | `upload/page.tsx` | 上传页：requireLogin → `<UploadPageClient user={...}>` |
 | `i/[id]/page.tsx` | 详情页：requireLogin + 算 canDelete/isAdmin → `<WorkDetailClient>` |
 | `profile/page.tsx` | 个人资料：requireLogin → `<ProfileClient>` |
-| `u/[username]/page.tsx` | 用户主页：requireLogin + getUserByUsername（**decodeURIComponent 解码中文用户名**）→ `<UserPageClient>`（资料卡+统计+作品/收藏） |
+| `u/[username]/page.tsx` | 用户主页：requireLogin + `getUserByHandle`（**decodeURIComponent 解码中文句柄**，按用户名或昵称解析）→ `<UserPageClient>`（资料卡+统计+作品/收藏；作品与统计按「昵称 + 用户名」两个别名取并集） |
 
 ### API 路由（`src/app/api/`）
 | 文件 | 用途 |
@@ -252,6 +254,7 @@ systemctl reload <反代服务>    # 改反代配置后重载
 | `me/avatar/route.ts` | 上传头像（multipart，校验类型/大小，存 `data/avatars/`，更新 users.avatar） |
 | `me/token/route.ts` | API Token：GET 查 `{hasToken}`（不返回明文）/ POST 生成重置 `{token}`（明文一次） |
 | `me/password/route.ts` | 修改密码（校验旧密码，新密码 ≥8 位且不同于旧密码） |
+| `me/nickname/route.ts` | 修改昵称（昵称=作品作者名；校验格式/保留名/重名，同事务级联本人作品；限流 5 次/小时） |
 | `me/pref/route.ts` | R18G 屏蔽偏好：GET 读 / POST 存（selected 按词表校验、custom ≤40 字符） |
 | `me/studio/route.ts` | 生图台个人密钥：GET 状态（脱敏）/ POST 保存（密钥留空=不变，clear=清除，URL 留空=默认；`probe_direct` 测直连 Token）/ DELETE 清除 |
 | `avatars/[name]/route.ts` | 服务头像文件 |
@@ -268,8 +271,9 @@ systemctl reload <反代服务>    # 改反代配置后重载
 ### 库（`src/lib/`）
 | 文件 | 用途 |
 |---|---|
-| `db.ts` | SQLite 数据层：works CRUD/搜索/分页（listWorks 支持 q/prompt/ai_type/author/sort）、users/sessions 增删查、**点赞/收藏 toggle、浏览量去重、API Token 生成/校验/查询**、getDb() 自动建表 + 兼容旧表 ALTER |
-| `auth.ts` | 认证：scrypt 哈希/校验、registerUser、login/logout/currentUser（cookie 会话）、ensureAdmin（未调用）、safeUser |
+| `db.ts` | SQLite 数据层：works CRUD/搜索/分页（listWorks 支持 q/prompt/ai_type/author/author_in/sort）、users/sessions 增删查（**getUserByHandle 按用户名或昵称解析、isNameTakenByOthers 重名判定、updateAuthorName 改昵称并级联作品作者名**）、**点赞/收藏 toggle、浏览量去重、API Token 生成/校验/查询**、getDb() 自动建表 + 兼容旧表 ALTER |
+| `auth.ts` | 认证：scrypt 哈希/校验、registerUser、**renameUser（昵称校验 + 重名判定 + 级联改名）**、login/logout/currentUser（cookie 会话）、ensureAdmin（未调用）、safeUser |
+| `names.ts` | 名称规则（纯函数，可单测）：用户名/昵称长度与字符集、系统保留名（含泛用作者名 群友/匿名/游客）、`validateNickname`、`isOwnAuthorName`（作品归属判定：昵称或用户名命中即本人） |
 | `guard.ts` | `requireLogin()` 页面级登录保护 |
 | `types.ts` | 共享类型：Work/WorkListItem/PagedWorks/PerImageMeta/PngParseResult + `getPerImageMetas()` |
 | `format.ts` | ai_type 标签、日期格式化 |
@@ -291,8 +295,8 @@ systemctl reload <反代服务>    # 改反代配置后重载
 | `CopyButton.tsx` | 复制按钮（Prompt/Negative/画师 三框共用） |
 | `UploadPageClient.tsx` | 上传页（client）：拖拽/多图/PNG 解析/共用标题 |
 | `LoginForm.tsx` `RegisterForm.tsx` | 登录/注册表单（client） |
-| `UserBadge.tsx` | **头像下拉菜单**：圆形头像（有图显示/无则 SVG 人形默认）、管理员金色徽标（仅 admin）、点击弹出【我的主页】【个人资料设置】【登出】、点外部关闭、`ml-auto` 贴最右 |
-| `ProfileClient.tsx` | 个人资料页（client）：换头像 + 信息展示 + **修改密码** + API Token 生成/复制/重新生成 + **生图台密钥配置**（双后端地址/密钥、保存/测试直连/清除） + **R18G 屏蔽偏好开关/弹窗** |
+| `UserBadge.tsx` | **头像下拉菜单**：圆形头像（有图显示/无则 SVG 人形默认）、管理员金色徽标（仅 admin）、点击弹出【我的主页】【个人资料设置】【登出】、点外部关闭、`ml-auto` 贴最右；菜单内显示**昵称**（`displayName`，未传回退用户名），昵称≠用户名时补 `@用户名` |
+| `ProfileClient.tsx` | 个人资料页（client）：换头像 + 信息展示（**昵称就地编辑：行内输入 + 保存/取消 + 字数与规则提示 + 已占用/保留名报错原样回显**） + **修改密码** + API Token 生成/复制/重新生成 + **生图台密钥配置**（双后端地址/密钥、保存/测试直连/清除） + **R18G 屏蔽偏好开关/弹窗** |
 | `UserPageClient.tsx` | 用户主页（client）：资料卡 + 统计行 + 作品\|收藏 Tab 滑块（GalleryCard 网格） |
 | `R18gPickerModal.tsx` | R18G 屏蔽词勾选弹窗：分组中英对照 + 搜索过滤 + 自定义词输入 + 搜索预览（保存走 `/api/me/pref`） |
 
@@ -311,6 +315,7 @@ systemctl reload <反代服务>    # 改反代配置后重载
 | 文件 | 用途 |
 |---|---|
 | `png.test.ts` | PNG 解析器单元测试（画师提取/ComfyUI 解析/畸形输入护栏）；`npm test` 运行（node:test + tsx） |
+| `names.test.ts` | 名称规则单元测试（昵称长度/字符集/空值、保留名与泛用作者名、归属判定 isOwnAuthorName）；`npm test` 运行 |
 
 ---
 
@@ -356,6 +361,19 @@ systemctl reload <反代服务>    # 改反代配置后重载
     - **部署**：`data/taglib.db` 不在 git 里，`scripts/deploy-hk3.sh` 会**单独原子拷**到线上 `data/`（只碰这一个文件，绝不覆盖同目录的 `aitag.db` / `studio.secret`），并在健康检查里校验。
 30. **精准参考（director）只支持 4.5 系（2026-09-14，实测）**：上游中转对 `director_reference_*` 的请求，**5 系模型会报 500**（`novelai adaptor: precise reference is only supported by NAI 4.5 models`），与官方文档「4.5/5 全系」不符。`DIRECTOR_MODELS` 白名单因此**只放行 4.5 系**，其余模型一律回退 `nai-diffusion-4-5-full` 并打日志（回退必须留痕，否则线上排查只能靠猜）。面板提示文案已同步更正。
 31. **参考模式与逐图强度（2026-09-14）**：`vibe`（氛围转移，默认强度 0.6，`information_extracted` 0.7）只迁移氛围/风格，**不保证人物一致性**；`director`（精准参考，默认强度 1.0、`base_caption` `character&style`）才保人物/服装。面板切换模式时会按新模式默认值刷新逐图强度，但**用户手改过的值保留**（判据：值仍等于上次自动套用值 `autoStrength` 即视为未定制）。生图请求日志已补 `参考图字节` / `强度[]` / `描述[]`，便于与 AstrBot 的 `ref_bytes` 口径对照。
+32. **昵称修改（2026-09-18）**：昵称就是 `users.author_name`，也是作品展示的作者名（`works.author_name`）。作品归属没有 user_id 外键，全靠作者名**字符串匹配**，所以改名功能必须配三件事，缺一个都会出事：
+    - **重名硬校验**：`isNameTakenByOthers` 查「他人用户名或昵称」（`COLLATE NOCASE`）——允许重名等于允许认领他人作品；保留名黑名单比注册更严（额外禁 `群友` / `匿名` / `游客` / `guest`，这些是存量无名作品的默认作者名）。
+    - **同事务级联**：`updateAuthorName` 在 `BEGIN IMMEDIATE` 里改 `users.author_name` 并 `UPDATE works SET author_name = ? WHERE author_name IN (旧昵称, 用户名)`，顺带收敛历史上「作品作者名 = 登录名」的行（admin 等改过昵称的账号以前就对不上）。
+    - **旧路径全部改判据**：上传写作者名改用「账号昵称」；删除权限与详情页 `canDelete` 用 `isOwnAuthorName`；`/u/[handle]` 用 `getUserByHandle`（先用户名后昵称），否则改名后详情页的作者链接 `/u/<昵称>` 会 404、本人主页会空白、连自己的作品都删不掉。
+    - 用户主页的作品与统计按「昵称 + 用户名」两个别名取并集（`listWorks.author_in` / `getUserStats(string[])`），兼容任何改名时点的历史数据。
+    - 改名本身限流 5 次/小时/用户（**校验在限流之前**：格式非法的请求直接报错、不计配额，避免手误被锁）；昵称与当前值相同视为成功且不写库（幂等）。
+    - **做过的实测**：注册两个用户 → 上传作品 → 改名（作者名同步、主页与统计正常、删除权限仍在）→ 用第二个用户抢注同一昵称被 400 拒绝 → 保留名 `群友` 被拒。
+    - 🔴 **合并审阅时补掉的三个坑**（原实现有，已修）：
+      1. **`users.author_name` 没有唯一索引**（只有 `username` 有 `lower(username)` 唯一索引），所以 `updateAuthorName` 里那段 `catch(e){ if(/UNIQUE/) }` 是**死代码**，数据库根本不兜底。原实现「先查后写」在并发改名时会双双通过检查 → 两人重名 → 作品互相认领（TOCTOU）。现已把查重**移进 `BEGIN IMMEDIATE` 事务内**（拿到写锁后再查，天然串行化），`updateAuthorName` 返回 `{ok:false}` 表示被挡下。
+      2. **注册只查了 `username`，没查 `author_name`**：昵称可改之后会出现「A 把昵称改成 X」→「B 注册用户名 X」→ 两个账号 `author_name` 都是 X。已新增 `db.isNameTaken`（用户名 **或** 昵称双向查重）并用于 `registerUser`。
+      3. **保留名把管理员自己也锁死了**：`ensureAdmin` 写的昵称是「管理员」、admin 账号本身叫 `admin`，两者都在保留名黑名单里 —— 管理员**改走一次就再也改不回来**（实测撞到）。现给 `validateNickname` 加 `{allowReserved}`，仅 `role === "admin"` 放行；路由与 `renameUser` 两处同口径（权威校验在 `renameUser`）。
+    - ⚠️ `/u/[handle]` 解析**优先昵称、再用户名**：作者链接用的就是昵称，改过名的账号必须优先命中本人（双向查重后两者已不会分属不同人）。
+    - **入口位置**：`「更换头像」右侧的「修改昵称」按钮**（展开输入框），信息表里的「昵称」行也保留了一个「修改」入口，两处共用同一套状态。
 
 ---
 

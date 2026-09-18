@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { getUserByUsername, getUserStats, listWorks, listBookmarkedWorks, getUserPref } from "@/lib/db";
+import { getUserByHandle, getUserStats, listWorks, listBookmarkedWorks, getUserPref } from "@/lib/db";
 import { requireLogin } from "@/lib/guard";
 import { currentUser } from "@/lib/auth";
 import { expandHiddenTags, defaultHiddenTags } from "@/lib/r18g-tags";
@@ -36,12 +36,19 @@ export default async function UserPage({
       : defaultHiddenTags();
   }
 
-  const user = getUserByUsername(username);
+  // 按句柄解析：用户名或昵称都能打开（详情页的作者链接用的是作品作者名=昵称）
+  const user = getUserByHandle(username);
   if (!user) notFound();
 
-  const stats = getUserStats(user.author_name || user.username);
+  // 作者名别名集合（昵称 + 登录名）：改过昵称的账号，历史作品的 author_name
+  // 可能是旧昵称或注册名，主页作品与统计必须两者都算
+  const authorNames = Array.from(
+    new Set([user.author_name || user.username, user.username]),
+  );
+
+  const stats = getUserStats(authorNames);
   const works = listWorks({
-    author: user.author_name || user.username,
+    author_in: authorNames,
     sort: "new",
     page: 1,
     page_size: 48,

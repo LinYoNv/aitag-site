@@ -149,6 +149,7 @@ export default function GalleryPage({ user }: { user: UserInfo }) {
           username={user.username}
           isAdmin={user.role === "admin"}
           avatar={user.avatar}
+          displayName={user.author_name}
         />
       </header>
 

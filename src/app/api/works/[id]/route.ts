@@ -6,6 +6,7 @@ import {
   deleteWorkSideRecords,
 } from "@/lib/db";
 import { currentUser } from "@/lib/auth";
+import { isOwnAuthorName } from "@/lib/names";
 import { extractArtistsFromPrompt } from "@/lib/png";
 
 export const dynamic = "force-dynamic";
@@ -57,8 +58,8 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "作品不存在" }, { status: 404 });
   }
 
-  // 权限：管理员可删全部；作者只能删自己的（author_name === username）
-  const isOwner = work.author_name === user.username;
+  // 权限：管理员可删全部；作者只能删自己的（昵称或注册名命中即算本人，改名后不丢权限）
+  const isOwner = isOwnAuthorName(work.author_name, user);
   if (user.role !== "admin" && !isOwner) {
     return NextResponse.json(
       { error: "无权限：只能删除自己上传的作品" },

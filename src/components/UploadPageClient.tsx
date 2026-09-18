@@ -579,6 +579,7 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
             username={user.username}
             isAdmin={user.role === "admin"}
             avatar={user.avatar}
+            displayName={user.author_name}
           />
         </div>
       </header>

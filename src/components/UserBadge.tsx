@@ -8,9 +8,12 @@ interface Props {
   username: string;
   isAdmin?: boolean;
   avatar?: string;
+  /** 昵称（= 作品作者名）；不传时回退到用户名 */
+  displayName?: string;
 }
 
-export default function UserBadge({ username, isAdmin, avatar }: Props) {
+export default function UserBadge({ username, isAdmin, avatar, displayName }: Props) {
+  const name = displayName?.trim() || username;
   const [open, setOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -74,15 +77,16 @@ export default function UserBadge({ username, isAdmin, avatar }: Props) {
             </span>
             <div className="min-w-0">
               <div className="text-sm font-semibold text-[#e6edf3] truncate flex items-center gap-1.5">
-                {username}
+                {name}
                 {isAdmin && (
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#3a2a1a] text-[#ffb45a] border border-[#5a4a2a] shrink-0">
                     管理员
                   </span>
                 )}
               </div>
-              <div className="text-xs text-[#aeb6c2]">
+              <div className="text-xs text-[#aeb6c2] truncate">
                 {isAdmin ? "管理员" : "用户"}
+                {name !== username && <span className="text-[#5a6270]"> · @{username}</span>}
               </div>
             </div>
           </div>

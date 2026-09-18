@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getWorkById, getUserActionState } from "@/lib/db";
 import { requireLogin } from "@/lib/guard";
+import { isOwnAuthorName } from "@/lib/names";
 import WorkDetailClient from "@/components/WorkDetailClient";
 
 export const dynamic = "force-dynamic";
@@ -15,8 +16,8 @@ export default async function WorkDetailPage({
   const work = getWorkById(id);
   if (!work) notFound();
 
-  // 删除权限：管理员可删全部；作者只能删自己的（按用户名匹配）
-  const canDelete = user.role === "admin" || work.author_name === user.username;
+  // 删除权限：管理员可删全部；作者只能删自己的（昵称或注册名命中即算本人）
+  const canDelete = user.role === "admin" || isOwnAuthorName(work.author_name, user);
 
   // 当前用户对作品的点赞/收藏状态
   const actionState = getUserActionState(user.id, id);

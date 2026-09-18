@@ -319,6 +319,8 @@ export function listWorks(opts: {
   ai_type?: string;
   time_range?: string;
   author?: string;
+  /** 作者名候选（用户主页用）：昵称 + 用户名都要能命中，兼容改名前后的作品 */
+  author_in?: string[];
   /** 屏蔽 tag：正向 prompt 含任一该词的图排除（逗号分隔多个，兼容旧用法） */
   block_tags?: string;
   /** 屏蔽 tag（数组形式）：各词都按「正向 prompt 词边界命中」独立排除，全部满足才保留 */
@@ -374,10 +376,20 @@ export function listWorks(opts: {
     where.push("ai_type = ?");
     params.push(opts.ai_type);
   }
-  // 作者过滤（用户主页）：author_name 精确匹配用户名
-  if (opts.author) {
+  // 作者过滤（用户主页）：author_name 精确匹配昵称/用户名
+  // author_in 用于「昵称 ≠ 用户名」的账号（含历史遗留行），多个别名取并集
+  const authorNames: string[] = [];
+  if (opts.author) authorNames.push(opts.author);
+  for (const a of opts.author_in ?? []) {
+    const v = a.trim();
+    if (v && !authorNames.includes(v)) authorNames.push(v);
+  }
+  if (authorNames.length === 1) {
     where.push("author_name = ?");
-    params.push(opts.author);
+    params.push(authorNames[0]);
+  } else if (authorNames.length > 1) {
+    where.push(`author_name IN (${authorNames.map(() => "?").join(", ")})`);
+    params.push(...authorNames);
   }
 
   const whereSql = where.length ? "WHERE " + where.join(" AND ") : "";
@@ -417,10 +429,16 @@ export function listWorks(opts: {
 }
 
 // 用户主页统计：作品数 / 获赞总数 / 被收藏总数 / 总浏览
+// 接受多个作者名别名（昵称 + 用户名），兼容改名前后上传的作品
 export function getUserStats(
-  authorName: string,
+  authors: string | string[],
 ): { work_count: number; total_likes: number; total_bookmarks: number; total_views: number } {
   const d = getDb();
+  const names = (Array.isArray(authors) ? authors : [authors])
+    .map((a) => a.trim())
+    .filter((a, i, arr) => a && arr.indexOf(a) === i);
+  const empty = { work_count: 0, total_likes: 0, total_bookmarks: 0, total_views: 0 };
+  if (names.length === 0) return empty;
   const row = d
     .prepare(
       `SELECT
@@ -428,9 +446,9 @@ export function getUserStats(
          COALESCE(SUM(total_likes), 0) AS total_likes,
          COALESCE(SUM(total_bookmarks), 0) AS total_bookmarks,
          COALESCE(SUM(total_view), 0) AS total_views
-       FROM works WHERE author_name = ?`,
+       FROM works WHERE author_name IN (${names.map(() => "?").join(", ")})`,
     )
-    .get(authorName) as
+    .get(...names) as
     | { work_count: number; total_likes: number; total_bookmarks: number; total_views: number }
     | undefined;
   return {
@@ -531,6 +549,90 @@ export function updateAvatar(userId: string, avatarUrl: string): void {
 export function updatePassword(userId: string, passwordHash: string): void {
   const d = getDb();
   d.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).run(passwordHash, userId);
+}
+
+/**
+ * 改昵称（昵称 = 作品作者名）：users.author_name 与本人作品的 author_name 同一事务内同步。
+ *
+ * 为什么必须级联：作品归属靠字符串 `works.author_name`，用户主页/统计/删除权限都按它匹配。
+ * 只改 users 不改 works 的话，改名后「我的主页」会变成空的。级联时同时收敛
+ * `author_name = username` 的历史行（早期上传写的是登录名，admin 等改过昵称的账号因此对不上）。
+ *
+ * ⚠️ 重名校验必须放在**同一个事务里**（BEGIN IMMEDIATE 之后）：
+ * `author_name` 列**没有唯一索引**（只有 `username` 有 `lower(username)` 唯一索引），
+ * 所以数据库不会替我们挡住重名 —— 先查后写会在并发改名时漏过去（TOCTOU），
+ * 而重名会让两个人的作品互相「认领」。放事务内 + BEGIN IMMEDIATE 拿写锁即可串行化。
+ *
+ * @returns `{ ok:false }` 表示重名被挡下；`{ ok:true }` 才真正写入。
+ */
+export function updateAuthorName(
+  userId: string,
+  newName: string,
+): { ok: true; works: number } | { ok: false; error: string } {
+  const d = getDb();
+  d.exec("BEGIN IMMEDIATE");
+  try {
+    const row = d
+      .prepare("SELECT username, author_name FROM users WHERE id = ?")
+      .get(userId) as { username: string; author_name: string } | undefined;
+    if (!row) throw new Error("用户不存在");
+
+    // 事务内复查重名（拿的是写锁，此刻不会再有人插进来）
+    const taken = d
+      .prepare(
+        `SELECT 1 FROM users
+         WHERE id != ? AND (username = ? COLLATE NOCASE OR author_name = ? COLLATE NOCASE)
+         LIMIT 1`,
+      )
+      .get(userId, newName, newName);
+    if (taken) {
+      d.exec("ROLLBACK");
+      return { ok: false, error: "该昵称已被占用（他人的用户名或昵称与之重复）" };
+    }
+
+    const oldName = row.author_name || row.username;
+    d.prepare("UPDATE users SET author_name = ? WHERE id = ?").run(newName, userId);
+    const res = d
+      .prepare("UPDATE works SET author_name = ? WHERE author_name = ? OR author_name = ?")
+      .run(newName, oldName, row.username);
+    d.exec("COMMIT");
+    return { ok: true, works: Number(res.changes) };
+  } catch (e) {
+    d.exec("ROLLBACK");
+    throw e;
+  }
+}
+
+/** 昵称/用户名是否已被**他人**占用（大小写不敏感），改名前必查 */
+export function isNameTakenByOthers(name: string, userId: string): boolean {
+  const d = getDb();
+  const row = d
+    .prepare(
+      `SELECT 1 FROM users
+       WHERE id != ? AND (username = ? COLLATE NOCASE OR author_name = ? COLLATE NOCASE)
+       LIMIT 1`,
+    )
+    .get(userId, name, name);
+  return Boolean(row);
+}
+
+/**
+ * 名称是否已被任何账号占用（用户名 **或** 昵称，大小写不敏感）。
+ *
+ * 注册专用：注册时用户名即昵称，所以必须**两个方向都挡**，否则会出现
+ * 「A 把昵称改成 X」→「B 注册用户名 X」→ 两个人的 author_name 都是 X，
+ * 作品互相认领、`/u/X` 指向谁全看查询顺序。改名方向由 isNameTakenByOthers 负责。
+ */
+export function isNameTaken(name: string): boolean {
+  const d = getDb();
+  const row = d
+    .prepare(
+      `SELECT 1 FROM users
+       WHERE username = ? COLLATE NOCASE OR author_name = ? COLLATE NOCASE
+       LIMIT 1`,
+    )
+    .get(name, name);
+  return Boolean(row);
 }
 
 // ---- 用户偏好：R18G 内容屏蔽（总开关 + 勾选词 + 自定义词） ----
@@ -712,6 +814,27 @@ export function getUserByUsername(username: string): UserRow | null {
     .prepare("SELECT * FROM users WHERE username = ? COLLATE NOCASE")
     .get(username.trim()) as Record<string, unknown> | undefined;
   return row ? (row as unknown as UserRow) : null;
+}
+
+/**
+ * 按「句柄」查用户：先按用户名，再按昵称（都大小写不敏感）。
+ * 用于 /u/[handle] 路由 —— 改了昵称之后，历史作品的作者链接 `/u/<昵称>` 仍要能打开。
+ */
+export function getUserByHandle(handle: string): UserRow | null {
+  const h = handle.trim();
+  if (!h) return null;
+  const d = getDb();
+  // 先昵称、再用户名：/u/ 的链接是从「作品作者名」点进来的，而作者名展示的就是昵称。
+  // 改过昵称的账号，其历史作品的链接指向新昵称，必须优先命中本人。
+  // （注册与改名都做了双向查重，正常不会出现两者分属不同人的情况。）
+  const byAuthor = d
+    .prepare("SELECT * FROM users WHERE author_name = ? COLLATE NOCASE")
+    .get(h) as Record<string, unknown> | undefined;
+  if (byAuthor) return byAuthor as unknown as UserRow;
+  const byUsername = d
+    .prepare("SELECT * FROM users WHERE username = ? COLLATE NOCASE")
+    .get(h) as Record<string, unknown> | undefined;
+  return byUsername ? (byUsername as unknown as UserRow) : null;
 }
 
 export function getUserById(id: string): UserRow | null {

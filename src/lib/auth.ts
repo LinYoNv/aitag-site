@@ -9,31 +9,17 @@ import {
   createUser,
   deleteSession,
   getSessionUser,
+  getUserById,
   getUserByUsername,
+  isNameTaken,
+  isNameTakenByOthers,
+  updateAuthorName,
   type UserRow,
 } from "./db";
+import { RESERVED_USERNAMES, validateNickname } from "./names";
 
 export const SESSION_COOKIE = "aitag_session";
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 天
-
-/** 保留用户名：用户名默认会作为作品作者名展示，禁止冒充管理员/官方 */
-const RESERVED_USERNAMES = new Set([
-  "admin",
-  "administrator",
-  "root",
-  "system",
-  "official",
-  "moderator",
-  "mod",
-  "staff",
-  "support",
-  "aitag",
-  "管理员",
-  "官方",
-  "系统",
-  "客服",
-  "站长",
-]);
 
 /** scrypt 哈希密码：格式 salt:hash */
 export function hashPassword(password: string): string {
@@ -68,7 +54,9 @@ export function registerUser(
   // 反馈前端已有的快捷注册不再可用：密码下限提到 8 位（仅新注册，存量用户不受影响）
   if (!password || password.length < 8) return { ok: false, error: "密码至少 8 位" };
   // 大小写不敏感查重：Admin / admin 视为同名（getUserByUsername 内部 NOCASE）
-  if (getUserByUsername(name)) return { ok: false, error: "用户名已存在（大小写不同也算重复）" };
+  // ⚠️ 必须连 author_name 一起查：昵称可改之后，仅查用户名会漏掉
+  //    「A 昵称已改成 X」→「B 注册用户名 X」的撞名，两人作品会互相认领。
+  if (isNameTaken(name)) return { ok: false, error: "用户名已存在（大小写不同也算重复）" };
 
   const id = crypto.randomBytes(8).toString("hex");
   try {
@@ -96,6 +84,39 @@ export function ensureAdmin(username: string, password: string): void {
       author_name: "管理员",
     });
   }
+}
+
+/**
+ * 修改昵称（昵称 = 作品作者名，展示在用户主页 / 详情页 / 画廊卡片）。
+ *
+ * 校验顺序：格式（长度/字符集/保留名）→ 与自己的当前名相同则直接成功（幂等）
+ * → 事务内查重 + 同步历史作品作者名（见 db.updateAuthorName）。
+ * 查重是硬要求：作品归属靠 author_name 字符串匹配，允许重名等于允许认领他人作品。
+ *
+ * ⚠️ 真正的重名兜底在 `updateAuthorName` 的**事务内**：`users.author_name` 没有唯一索引
+ * （只有 username 有 lower(username) 唯一索引），所以这里先查一次只是为了让常见情况
+ * 少开一次事务，**不能**当成唯一防线。
+ */
+export function renameUser(
+  userId: string,
+  rawNickname: unknown,
+): { ok: true; user: UserRow } | { ok: false; error: string } {
+  const me = getUserById(userId);
+  if (!me) return { ok: false, error: "用户不存在" };
+  // 管理员放行保留名：否则 admin 账号（昵称默认就是保留名）改走一次就再也改不回来
+  const checked = validateNickname(rawNickname, { allowReserved: me.role === "admin" });
+  if (!checked.ok) return checked;
+  if (checked.name === (me.author_name || me.username)) {
+    return { ok: true, user: me }; // 没变化：不写库、不级联
+  }
+  if (isNameTakenByOthers(checked.name, userId)) {
+    return { ok: false, error: "该昵称已被占用（他人的用户名或昵称与之重复）" };
+  }
+  const res = updateAuthorName(userId, checked.name);
+  if (!res.ok) return { ok: false, error: res.error };
+  const user = getUserById(userId);
+  if (!user) return { ok: false, error: "修改失败，请重试" };
+  return { ok: true, user };
 }
 
 /** 登录：校验 + 建 session，返回 token */

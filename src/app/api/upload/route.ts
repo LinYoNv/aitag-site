@@ -173,7 +173,7 @@ export async function POST(req: NextRequest) {
     const title = String(form.get("title") ?? "").slice(0, 200);
     const caption = String(form.get("caption") ?? "").slice(0, 500);
     const aiType = String(form.get("ai_type") ?? "nai");
-    const authorName = user.username; // 作者 = 登录用户名
+    const authorName = user.author_name || user.username; // 作者 = 账号昵称（未设昵称时回退用户名）
     const shareTitle = String(form.get("share_title") ?? "") === "1";
 
     // 收集所有文件

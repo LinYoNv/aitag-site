@@ -2,6 +2,7 @@
 
 import { useRef, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import UserBadge from "@/components/UserBadge";
 import DefaultAvatar from "@/components/DefaultAvatar";
 import R18gPickerModal from "@/components/R18gPickerModal";
@@ -18,10 +19,17 @@ interface Props {
 }
 
 export default function ProfileClient({ user }: Props) {
+  const router = useRouter();
   const [avatar, setAvatar] = useState(user.avatar ?? "");
   const [uploading, setUploading] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // 昵称（= 作品作者名）
+  const [nickname, setNickname] = useState(user.author_name || user.username);
+  const [nickDraft, setNickDraft] = useState(user.author_name || user.username);
+  const [nickEditing, setNickEditing] = useState(false);
+  const [nickSaving, setNickSaving] = useState(false);
+  const [nickMsg, setNickMsg] = useState<{ ok: boolean; text: string } | null>(null);
   // API Token
   const [token, setToken] = useState("");
   const [hasToken, setHasToken] = useState(false);
@@ -148,6 +156,48 @@ export default function ProfileClient({ user }: Props) {
   }
 
   const createDate = user.create_date ? new Date(user.create_date).toLocaleDateString("zh-CN") : "";
+
+  // 修改昵称（昵称 = 作品作者名；服务端会级联同步历史作品的作者名）
+  const saveNickname = useCallback(async () => {
+    const next = nickDraft.trim();
+    if (!next) {
+      setNickMsg({ ok: false, text: "昵称不能为空" });
+      return;
+    }
+    if (next === nickname) {
+      setNickEditing(false);
+      setNickMsg(null);
+      return;
+    }
+    setNickSaving(true);
+    setNickMsg(null);
+    try {
+      const res = await fetch("/api/me/nickname", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nickname: next }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        user?: { author_name?: string };
+        error?: string;
+      };
+      if (res.ok && data.ok) {
+        const saved = data.user?.author_name || next;
+        setNickname(saved);
+        setNickDraft(saved);
+        setNickEditing(false);
+        setNickMsg({ ok: true, text: "✓ 昵称已更新，历史作品的作者名已同步" });
+        router.refresh(); // 头部头像菜单里的昵称也要跟着变
+      } else {
+        setNickMsg({ ok: false, text: data.error ?? "修改失败" });
+      }
+    } catch {
+      setNickMsg({ ok: false, text: "网络错误" });
+    } finally {
+      setNickSaving(false);
+    }
+  }, [nickDraft, nickname, router]);
 
   // 修改密码
   const handleChangePassword = useCallback(async () => {
@@ -386,6 +436,7 @@ export default function ProfileClient({ user }: Props) {
             username={user.username}
             isAdmin={user.role === "admin"}
             avatar={avatar}
+            displayName={nickname}
           />
         </div>
       </header>
@@ -402,13 +453,25 @@ export default function ProfileClient({ user }: Props) {
                 <DefaultAvatar className="w-full h-full" />
               )}
             </div>
-            <button
-              onClick={() => fileRef.current?.click()}
-              disabled={uploading}
-              className="text-sm bg-[#151922] border border-[#262b36] text-[#e6edf3] px-4 py-1.5 rounded-lg hover:border-[#4c9fff] disabled:opacity-50"
-            >
-              {uploading ? "上传中…" : "更换头像"}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => fileRef.current?.click()}
+                disabled={uploading}
+                className="text-sm bg-[#151922] border border-[#262b36] text-[#e6edf3] px-4 py-1.5 rounded-lg hover:border-[#4c9fff] disabled:opacity-50"
+              >
+                {uploading ? "上传中…" : "更换头像"}
+              </button>
+              <button
+                onClick={() => {
+                  setNickDraft(nickname);
+                  setNickMsg(null);
+                  setNickEditing(true);
+                }}
+                className="text-sm bg-[#151922] border border-[#262b36] text-[#e6edf3] px-4 py-1.5 rounded-lg hover:border-[#4c9fff]"
+              >
+                修改昵称
+              </button>
+            </div>
             <input
               ref={fileRef}
               type="file"
@@ -420,6 +483,69 @@ export default function ProfileClient({ user }: Props) {
               <p className={`mt-2 text-sm ${msg.ok ? "text-green-400" : "text-red-400"}`}>
                 {msg.text}
               </p>
+            )}
+            {/* 昵称编辑面板：随「修改昵称」按钮展开，与下方信息表里的入口共用同一套状态 */}
+            {nickEditing && (
+              <div className="mt-4 w-full max-w-sm">
+                <label className="block text-xs text-[#aeb6c2] mb-1.5 text-left" htmlFor="nicknameInput">
+                  新昵称（= 作品作者名）
+                </label>
+                <input
+                  id="nicknameInput"
+                  type="text"
+                  value={nickDraft}
+                  onChange={(e) => setNickDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void saveNickname();
+                    } else if (e.key === "Escape") {
+                      setNickEditing(false);
+                      setNickDraft(nickname);
+                      setNickMsg(null);
+                    }
+                  }}
+                  maxLength={30}
+                  disabled={nickSaving}
+                  autoFocus
+                  spellCheck={false}
+                  className="w-full bg-[#0f1218] border border-[#262b36] rounded-lg px-3 py-1.5 text-sm text-[#e6edf3] outline-none focus:border-[#4c9fff] disabled:opacity-50"
+                />
+                <div className="flex items-center justify-between mt-2">
+                  <span className="text-[11px] text-[#5a6270]">
+                    {Array.from(nickDraft.trim()).length}/30
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => void saveNickname()}
+                      disabled={nickSaving || !nickDraft.trim()}
+                      className="text-xs bg-[#4c9fff] text-white px-3 py-1.5 rounded-lg hover:opacity-90 disabled:opacity-50"
+                    >
+                      {nickSaving ? "保存中…" : "保存"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setNickEditing(false);
+                        setNickDraft(nickname);
+                        setNickMsg(null);
+                      }}
+                      disabled={nickSaving}
+                      className="text-xs bg-[#151922] border border-[#262b36] text-[#e6edf3] px-3 py-1.5 rounded-lg hover:border-[#4c9fff] disabled:opacity-50"
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
+                <p className="text-[11px] text-[#5a6270] leading-relaxed mt-1.5">
+                  2–30 字符（字母 / 数字 / 下划线 / 中文）；会同步到你全部作品的作者名；
+                  不可与他人重名，也不能用系统保留名
+                </p>
+                {nickMsg && (
+                  <p className={`text-[11px] mt-1.5 ${nickMsg.ok ? "text-green-400" : "text-red-400"}`}>
+                    {nickMsg.text}
+                  </p>
+                )}
+              </div>
             )}
           </div>
 
@@ -441,9 +567,81 @@ export default function ProfileClient({ user }: Props) {
                 )}
               </dd>
             </div>
-            <div className="flex justify-between border-b border-[#262b36] pb-3">
-              <dt className="text-[#aeb6c2]">昵称</dt>
-              <dd className="text-[#e6edf3]">{user.author_name || user.username}</dd>
+            <div className="flex justify-between items-start gap-3 border-b border-[#262b36] pb-3">
+              <dt className="text-[#aeb6c2] shrink-0 pt-1.5">昵称</dt>
+              <dd className="text-[#e6edf3] text-right flex-1 min-w-0">
+                {nickEditing ? (
+                  <div className="flex flex-col items-end gap-2">
+                    <input
+                      type="text"
+                      value={nickDraft}
+                      onChange={(e) => setNickDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          void saveNickname();
+                        } else if (e.key === "Escape") {
+                          setNickEditing(false);
+                          setNickDraft(nickname);
+                          setNickMsg(null);
+                        }
+                      }}
+                      maxLength={30}
+                      disabled={nickSaving}
+                      autoFocus
+                      spellCheck={false}
+                      aria-label="新昵称"
+                      className="w-full bg-[#0f1218] border border-[#262b36] rounded-lg px-3 py-1.5 text-sm text-[#e6edf3] outline-none focus:border-[#4c9fff] disabled:opacity-50"
+                    />
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-[#5a6270]">
+                        {Array.from(nickDraft.trim()).length}/30
+                      </span>
+                      <button
+                        onClick={() => void saveNickname()}
+                        disabled={nickSaving || !nickDraft.trim()}
+                        className="text-xs bg-[#4c9fff] text-white px-3 py-1.5 rounded-lg hover:opacity-90 disabled:opacity-50"
+                      >
+                        {nickSaving ? "保存中…" : "保存"}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setNickEditing(false);
+                          setNickDraft(nickname);
+                          setNickMsg(null);
+                        }}
+                        disabled={nickSaving}
+                        className="text-xs bg-[#151922] border border-[#262b36] text-[#e6edf3] px-3 py-1.5 rounded-lg hover:border-[#4c9fff] disabled:opacity-50"
+                      >
+                        取消
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-[#5a6270] leading-relaxed text-right">
+                      2–30 字符（字母 / 数字 / 下划线 / 中文）；会同步到你全部作品的作者名；
+                      不可与他人重名，也不能用系统保留名
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-end gap-2">
+                    <span className="truncate">{nickname}</span>
+                    <button
+                      onClick={() => {
+                        setNickDraft(nickname);
+                        setNickMsg(null);
+                        setNickEditing(true);
+                      }}
+                      className="shrink-0 text-xs text-[#4c9fff] hover:underline"
+                    >
+                      修改
+                    </button>
+                  </div>
+                )}
+                {nickMsg && (
+                  <p className={`text-[11px] mt-1 ${nickMsg.ok ? "text-green-400" : "text-red-400"}`}>
+                    {nickMsg.text}
+                  </p>
+                )}
+              </dd>
             </div>
             <div className="flex justify-between">
               <dt className="text-[#aeb6c2]">注册时间</dt>
