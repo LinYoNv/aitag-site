@@ -41,6 +41,7 @@
 - **双后端**：NAI 直连（nai.sta1n.cn `GET /generate`，画师串独立 artist 参数、CFG Rescale）+ OpenAI 兼容（api.syuan.org `/v1/images/*`）
 - OpenAI 兼容下支持 **NAI 全系模型**（vibe/精准参考 ≤8 张逐图权重、img2img、director-tools 图片处理、多角色坐标、种子）与 **gpt-image 模型**（quality/background/output_format 官方参数面，参考图走 `/v1/images/edits` multipart）
 - 画师串风格预设 6 套 + 自定义；服务端权威合并 prompt；结果可下载或一键「传到图库」（自动带生成参数入库）
+- **生图历史**：结果卡下方展示最近 **4 张**缩略图（可展开全部），服务端按用户保留最近 **20 条**；支持点开看大图、一键「复用词」把提示词填回输入框、删除单条 / 清空全部；**仅本人可见**
 - **中文提示词库**：面板「提示词组」分类/分组/标签云（11 分类 / 132 分组 / 4086 标签），支持中英文检索（含 2.2 万条 danbooru 中文补充），另有本地覆盖层可自增删；数据源为 WeiLin 词库（GPL-3.0，产物不进仓库，见「文档」）
 - **密钥用户自配**：在「个人资料设置 → 生图台密钥」填自己的 OpenAI 兼容 Key / sta1n Token（站点默认提供 api.syuan.org 与 nai.sta1n.cn 地址），消耗的是各自的额度；密钥存服务器、任何接口不回显，安全实现细节见本地运维文档
 - 不限次数：消耗用户自己的上游额度

@@ -234,6 +234,30 @@ systemctl reload <反代服务>    # 改反代配置后重载
 
 索引：`idx_sessions_user`。登录/注册/登出均走 sessions 表；cookie 名 `aitag_session`。
 
+### studio_history（生图台历史）
+| 字段 | 说明 |
+|---|---|
+| id | TEXT PK（`crypto.randomBytes(8).toString('hex')`，16 位小写 hex） |
+| user_id | TEXT（**归属校验唯一依据**，接口一律按 `currentUser().id` 过滤） |
+| file / thumb | 原图与缩略图**文件名**（分别落 `data/uploads/hist/` 与 `data/uploads/hist/thumb/`） |
+| ext / backend / model / size | 图片扩展名与生成参数快照 |
+| prompt / negative | 提示词（截断存储：正向 8000 / 反向 4000 字符） |
+| meta | TEXT(JSON)（`{backend, kind, elapsed_ms}`） |
+| create_date | ISO |
+
+索引：`idx_studio_history_user(user_id, create_date DESC)`。
+
+**设计取舍**：图片**落盘、库里只存文件名**。把 base64 直接存进 SQLite 实现最短，
+但一张 2K 图几百 KB → 20 张就是十几 MB 的库，且每次列历史都要把 JSON 全量搬一遍。
+
+**保留上限 20 条**（`STUDIO_HISTORY_LIMIT`，口径在 `src/lib/studio-presets.ts`）：
+`POST /api/studio/generate` 成功后自动入库，超出后从旧到新裁剪，
+**库记录与磁盘文件一起删** —— 只裁库会留下永远无人引用的孤儿图片，磁盘只涨不落。
+
+> 表**懒创建**：建表语句在 `getDb()` 里，但只有**首次真正访问数据库**时才执行。
+> 因此线上刚部署完（匿名请求全被 401 挡在鉴权层、根本没碰库）时表可能尚不存在，
+> 第一次带登录态调用会自动建好 —— 这不是故障。
+
 ---
 
 ## 6. 文件用途（源码 `<本地源码目录>`）
@@ -284,8 +308,9 @@ systemctl reload <反代服务>    # 改反代配置后重载
 | `param-view.ts` | 参数展示字段顺序（NAI_ORDER / COMFY_ORDER）+ 画师列表转可复制文本 |
 | `r18g-tags.ts` | R18G 屏蔽词表（5 组中英对照 + 自定义组）、默认屏蔽词、偏好展开 |
 | `ratelimit.ts` | 进程内滑动窗口限流器（登录/注册/上传/头像/生图各自独立窗口）+ clientIp（x-forwarded-for 首段） |
-| `studio-presets.ts` | 生图台共享预设：模型/尺寸/采样器/画师串风格/默认负面词、NAI 尺寸契约归一化（前后端通用） |
+| `studio-presets.ts` | 生图台共享预设：模型/尺寸/采样器/画师串风格/默认负面词、NAI 尺寸契约归一化、**生图历史口径**（保留 20 条 / 面板预览 4 张 / 缩略图 480px WebP / 提示词截断上限 / 文件名与 id 安全校验 `isSafeHistoryFilename` `isHistoryId`）（前后端通用，无 server-only，故可被 `npm test` 覆盖） |
 | `studio.ts` | 生图台上游调用（server-only）：用户级配置（`users.studio_cfg` 读写 + 默认 URL 常量）、NAI OpenAI 兼容提交（vibe/director/img2img/director-tools/多角色，参考图 sharp 预处理）、gpt-image 提交（JSON/multipart）、sta1n 直连 GET、重试与错误翻译 |
+| `studio-history.ts` | 生图历史落盘与裁剪（server-only）：`saveStudioHistory()` 把生成结果写 `data/uploads/hist/`（原图 + 480px WebP 缩略图）并入库、超出 20 条库记录与文件一起删；`resolveHistoryFile()` 解析路径（防目录穿越）；**sharp 不可用时退化为「缩略图=原图」仍记录历史**（不静默丢弃） |
 
 ### 组件（`src/components/`）
 | 文件 | 用途 |
@@ -356,6 +381,7 @@ systemctl reload <反代服务>    # 改反代配置后重载
     - **openai**（api.syuan.org 等）：NAI 模型按 nai_image 契约——`/v1/images/generations` 顶层 `prompt/size/n/model/action` + `parameters{steps,scale,sampler,noise_schedule,seed,negative_prompt,reference_image_multiple,reference_strength_multiple,director_reference_*,use_coords,characterPrompts,v4_prompt}`，img2img 走 `/v1/images/edits`；尺寸契约 64 倍数/最大边 1920/面积 3686400（4K 档降级 2K）；参考图 ≤8 张，img2img 用 sharp 精确 cover 到目标尺寸、vibe/director 等比缩限；重试 408/429/502/503/504 + "稍后重试"类文案（2/4/8s 退避），超时不重试。gpt-image 模型（`gpt-image-*`）自动切换官方参数面：`quality/background/output_format`，参考图走 `/v1/images/edits` multipart `image[]`，NAI 参数自动忽略。
     - **密钥用户自配（2026-09-14 起）**：站点只提供默认 URL（`https://api.syuan.org` / `https://nai.sta1n.cn`，可在个人资料设置覆盖），每个用户在「个人资料设置 → 生图台密钥」填自己的 OpenAI Key / sta1n Token，生图消耗各自的额度。密钥服务端加密存 `users.studio_cfg`（`/api/me/studio` 与 `/api/studio/config` 一律不回显，GET 只给 `已配置/未配置` 状态；加密与密钥管理见本地运维文档）。未配置时生图返回 400 并引导去个人资料设置；`POST /api/me/studio` 支持 `probe_direct` 测试 sta1n Token（`POST /api/api/getUser`，响应体 `status:"error"` 视为无效）。
     - **结果入库**：结果卡「传到图库」走 `POST /api/upload`（b64→File + `meta_0` 带完整 prompt/参数，gpt-image 用 ai_type=other）。
+    - **生图历史（2026-09-21）**：`POST /api/studio/generate` 成功后，结果卡下方的「05 HIST」卡片展示最近 **4 张**缩略图（可展开全部），服务端保留 **20 条**（`studio_history` 表 + `data/uploads/hist/`，图片落盘、库里只存文件名）。详见数据模型一节与文档 §4.5.4。两个实测踩到的坑：①结果卡原是 `position:sticky`，**sticky 会浮在后续同级兄弟之上** → 与历史卡重叠，已去掉（注释留档）；②历史图原用 `max-age=3600`，**删除后浏览器仍从磁盘缓存回显已删的图**（服务端已 404）→ 改 `no-cache` + ETag。
 
 29. **中文提示词库（2026-09-14）**：面板「提示词组 / TAG LIBRARY」的数据源分两层——服务端词库优先，浏览器本地覆盖层（localStorage）叠加个人增删。
     - **服务端**：`GET /api/studio/tags`（需登录）读 `data/taglib.db`，返回结构与 `public/studio/tags.default.json` 完全一致的分类树（当前 11 分类 / 132 分组 / 4086 标签），另提供 `?q=` 在 danbooru 中文表（2.2 万条带翻译）里补充检索，中英文都可搜。
