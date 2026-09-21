@@ -155,6 +155,7 @@ check "生图台 iframe 面板" "http://127.0.0.1:$PORT/studio/index.html" "200"
 check "生图台页面（未登录 307 跳登录）" "http://127.0.0.1:$PORT/studio" "307"
 check "上传页面（未登录 307 跳登录）" "http://127.0.0.1:$PORT/upload" "307"
 check "词库接口（未登录 401）" "http://127.0.0.1:$PORT/api/studio/tags" "401"
+check "生图历史接口（未登录 401）" "http://127.0.0.1:$PORT/api/studio/history" "401"
 
 # 词库产物是否真的到位（不在 git 里，最容易漏的一项）
 if [[ -f "$DEPLOY/data/taglib.db" ]]; then

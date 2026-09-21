@@ -73,6 +73,10 @@ export async function POST(req: NextRequest) {
       probe = { ok: false, message: "未配置 API Key" };
     } else {
       try {
+        // ⚠️ 这里是**第二条真实生图路径**（另一条是 /api/studio/generate）。
+        // 它故意**不写入「生图历史」**：本接口的语义是「验证密钥能不能用」，
+        // 不是用户主动创作；每次保存设置都往历史塞一张测试图会把历史淹掉。
+        // 将来若要改成入库，请连同「历史里混入测试图」这个取舍一起重新评估。
         await generateNaiOpenAi(saved.openai, {
           full_prompt: "masterpiece, best quality, 1girl, solo, simple background, test",
           size: "832x1216",

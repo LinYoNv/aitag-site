@@ -208,3 +208,40 @@ export const DEFAULT_VIBE_STRENGTH = 0.6;
 export const DEFAULT_DIRECTOR_STRENGTH = 1.0;
 export const DEFAULT_DIRECTOR_SECONDARY_STRENGTH = 0.5;
 export const DEFAULT_DIRECTOR_CAPTION = "character&style";
+
+// ---- 生图历史（面板「生图历史」卡片 + /api/studio/history）----
+
+/** 每个用户保留的生图记录条数（超出后按时间从旧到新裁剪，图片文件一起删） */
+export const STUDIO_HISTORY_LIMIT = 20;
+
+/** 面板默认展示的缩略图张数（其余折叠在「展开全部」后面） */
+export const STUDIO_HISTORY_PREVIEW = 4;
+
+/** 历史图缩略图规格（与图库画廊同规格：480px WebP） */
+export const STUDIO_HISTORY_THUMB_WIDTH = 480;
+export const STUDIO_HISTORY_THUMB_QUALITY = 80;
+
+/** 历史记录里提示词的存储上限（历史只是回看用，不该无上限膨胀） */
+export const STUDIO_HISTORY_PROMPT_MAX = 8000;
+export const STUDIO_HISTORY_NEGATIVE_MAX = 4000;
+
+/**
+ * 历史图片文件名是否安全（防目录穿越）。
+ *
+ * 为什么单独抽成函数：`data/uploads/hist/` 下的文件名来自数据库字段，
+ * 一旦被污染（含 `../` 或路径分隔符）就会变成**任意文件读取**。
+ * 抽出来是为了能被 `npm test` 直接覆盖（db.ts / studio-history.ts 都带 server-only，
+ * 测试无法 import，所以安全判据必须住在纯模块里）。
+ */
+export function isSafeHistoryFilename(name: unknown): boolean {
+  if (typeof name !== "string" || !name) return false;
+  if (name.includes("/") || name.includes("\\") || name.includes("..")) return false;
+  // 不允许点开头：避免生成/读取隐藏文件
+  if (name.startsWith(".")) return false;
+  return true;
+}
+
+/** 历史记录 id 的口径：crypto.randomBytes(8).toString("hex") = 16 位小写 hex */
+export function isHistoryId(id: unknown): boolean {
+  return typeof id === "string" && /^[0-9a-f]{16}$/.test(id);
+}

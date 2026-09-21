@@ -15,6 +15,7 @@ import {
 } from "@/lib/studio";
 import { isGptImageModel, NAI_SIZE_MAP } from "@/lib/studio-presets";
 import { normalizeRefDataUri, dataUriToBuffer } from "@/lib/ref-image";
+import { saveStudioHistory } from "@/lib/studio-history";
 
 /** WxH → NAI 分档名（直连接口用）；已是分档名原样返回 */
 function reverseNaiSize(size: string): string {
@@ -256,6 +257,27 @@ export async function POST(req: NextRequest) {
     console.log(
       `[studio] 生成完成 user=${user.username} 后端=${backend} 图片=${data.length} 参考图=${refList.length} 耗时=${Date.now() - started}ms`,
     );
+
+    // 生图历史：落盘 + 入库（每用户保留最近 20 张，超出自动裁剪）。
+    // ⚠️ 历史是**附加能力**：这里任何失败都只打日志，绝不能把已经生成成功的图判为失败。
+    try {
+      const saved = await saveStudioHistory({
+        userId: user.id,
+        images: images.map((buf) => ({ buf, ext: studioImageExtension(buf) })),
+        backend,
+        model:
+          model ||
+          (backend === "direct" ? DEFAULT_NAI_DIRECT_MODEL : isGpt ? DEFAULT_GPTIMAGE_MODEL : DEFAULT_NAI_OPENAI_MODEL),
+        size: actualSize,
+        prompt: fullPrompt || directorAction,
+        negative,
+        meta: { backend, kind: isGpt ? "gptimage" : "nai", elapsed_ms: Date.now() - started },
+      });
+      console.log(`[studio] 生图历史：user=${user.username} 入库 ${saved}/${data.length} 张`);
+    } catch (e) {
+      console.warn(`[studio] 生图历史保存失败（不影响本次结果）user=${user.username}:`, e);
+    }
+
     return NextResponse.json({
       ok: true,
       data,

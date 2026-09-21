@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>生图台 · 图像合成与测试终端</title>
-  <link rel="stylesheet" href="./app.css?v=1.3.2" />
-  <link rel="stylesheet" href="./taglib.css?v=1.3.2" />
+  <link rel="stylesheet" href="./app.css?v=1.4.0" />
+  <link rel="stylesheet" href="./taglib.css?v=1.4.0" />
 </head>
 <body>
   <!-- 终末地等高线动态地形 Canvas + 底部工业网格 -->
@@ -631,11 +631,43 @@
             <div id="resultGrid" class="result-grid hidden"></div>
           </div>
         </div>
+
+        <!-- 生图历史：展示最近 4 张缩略图（服务端保留 20 条记录） -->
+        <div class="card tactical-card acrylic-card" id="historyCard">
+          <div class="card-header acrylic-header">
+            <div class="card-num-box">
+              <span class="card-number">05</span>
+              <span class="card-sec-tag">HIST</span>
+            </div>
+            <div class="card-title-group">
+              <h2 class="card-title">生图历史 // RECENT OUTPUTS</h2>
+              <span class="card-sub-code">LAST_20_RECORDS</span>
+            </div>
+            <div class="result-header-badge">
+              <span id="historyCount" class="badge badge-neutral">—</span>
+            </div>
+          </div>
+
+          <div class="card-body">
+            <div id="historyGrid" class="history-grid"></div>
+            <div id="historyEmpty" class="history-empty">
+              <span class="history-empty-icon">◌</span>
+              <span>暂无生图记录，生成第一张图后会自动出现在这里。</span>
+            </div>
+            <div class="history-foot">
+              <span id="historyHint" class="history-hint">仅本人可见 · 服务端保留最近 20 条</span>
+              <div class="history-actions">
+                <button id="historyToggle" type="button" class="btn-chip hidden">展开全部</button>
+                <button id="historyClear" type="button" class="btn-chip is-danger">✕ 清空历史</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
     </main>
   </div>
 
-  <script src="./taglib.js?v=1.3.2"></script>
-  <script src="./app.js?v=1.3.2"></script>
+  <script src="./taglib.js?v=1.4.0"></script>
+  <script src="./app.js?v=1.4.0"></script>
 </body>
 </html>

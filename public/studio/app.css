@@ -858,9 +858,15 @@ body::before {
 }
 
 /* ===== 右侧结果监视器 (SYNTH MONITOR & PREVIEWS) ===== */
+/* ⚠️ 这里曾经是 `position: sticky; top: 76px`（让结果图在滚动调参时钉住）。
+   加入「生图历史」卡后必须去掉：sticky 元素**会浮在后续同级兄弟之上**，
+   实测滚动 300px 时结果卡占 [76,617]、历史卡占 [360,667] → 两卡重叠，
+   历史缩略图被压在结果图底下（1440x900 与 1280x800 都复现）。
+   sticky 的浮动范围只受**父容器**约束、与兄弟无关，纯 CSS 没法"钉住但给兄弟让位"；
+   而右列现在 结果卡+历史卡 ≈ 850px、已接近视口高度，钉住的收益本就很小。
+   将来若要恢复钉住：把整个右列做成 sticky + max-height + 内部滚动，别只钉结果卡。 */
 .result-card {
-  position: sticky;
-  top: 76px;
+  position: relative;
 }
 
 .result-card-header {
@@ -1568,3 +1574,147 @@ body::before {
 .btn-chip:active { transform: translateY(1px); }
 .btn-chip.is-danger { border-color: rgba(255, 59, 48, 0.45); color: #a3221a; }
 .btn-chip.is-danger:hover { background: var(--edge-red); border-color: var(--edge-red); color: #fff; box-shadow: 0 2px 6px var(--edge-red-soft); }
+
+/* ==========================================================================
+   ===== 生图历史 (RECENT OUTPUTS) =====
+   右侧结果卡下方的独立卡片：默认只显示最近 4 张缩略图，可展开看全部（最多 20 条）。
+   ========================================================================== */
+.history-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2, 10px);
+}
+
+/* 收起态：只显示前 4 张；多出来的用 .hidden 交给 JS 控制，这里不做 nth-child 隐藏
+   （nth-child 隐藏会让"生图后前插新图"的 DOM 顺序变化时闪现错图） */
+.history-item {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1.5px solid var(--edge-border-glass);
+  background: var(--edge-soft);
+  cursor: pointer;
+  transition: transform var(--trans-fast), border-color var(--trans-fast), box-shadow var(--trans-fast);
+  animation: ef-fade-in 0.3s ease-out;
+}
+
+.history-item:hover {
+  transform: translateY(-2px);
+  border-color: var(--edge-ink-primary);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
+}
+
+.history-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform var(--trans-fast);
+}
+
+.history-item:hover img { transform: scale(1.04); }
+
+/* 序号角标（与结果图同款战术数字） */
+.history-item-index {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 2;
+  font-family: var(--font-tech);
+  font-size: 0.6rem;
+  font-weight: 900;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: var(--edge-signal);
+  color: var(--edge-ink-primary);
+  border: 1px solid var(--edge-ink-primary);
+  line-height: 1.5;
+}
+
+/* 悬停操作条：下载 / 复用参数 / 删除 */
+.history-item-actions {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+  padding: 5px;
+  background: linear-gradient(to top, rgba(16, 17, 16, 0.78), rgba(16, 17, 16, 0));
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity var(--trans-fast), transform var(--trans-fast);
+}
+
+.history-item:hover .history-item-actions,
+.history-item:focus-within .history-item-actions {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.history-item-action {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-tech);
+  font-size: 0.62rem;
+  font-weight: 800;
+  padding: 3px 2px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--edge-ink-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: all 0.14s ease;
+}
+
+.history-item-action:hover { background: var(--edge-signal); border-color: var(--edge-ink-primary); }
+.history-item-action.is-danger:hover { background: var(--edge-red); border-color: var(--edge-red); color: #fff; }
+
+/* 触摸设备没有 hover：操作条常显，否则手机上根本点不到（宁可略挤也不能不可用） */
+@media (hover: none) {
+  .history-item-actions { opacity: 1; transform: none; }
+}
+
+.history-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: var(--space-3, 14px) var(--space-2, 10px);
+  font-size: 0.8rem;
+  color: var(--edge-ink-muted);
+}
+
+.history-empty-icon { font-size: 1rem; color: var(--edge-ink-dim); }
+
+.history-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2, 10px);
+  flex-wrap: wrap;
+  margin-top: var(--space-3, 14px);
+  padding-top: var(--space-3, 14px);
+  border-top: 1px dashed var(--edge-border-l1);
+}
+
+.history-hint {
+  font-size: 0.72rem;
+  color: var(--edge-ink-muted);
+  font-family: var(--font-tech);
+}
+
+.history-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* 窄屏：4 列改 3 列，避免缩略图小到看不清 */
+@media (max-width: 640px) {
+  .history-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .history-hint { font-size: 0.68rem; }
+}

@@ -81,6 +81,14 @@
     cfgField: $("cfgField"),
     noiseScheduleField: $("noiseScheduleField"),
     styleCard: $("styleCard"),
+    // 生图历史
+    historyCard: $("historyCard"),
+    historyGrid: $("historyGrid"),
+    historyEmpty: $("historyEmpty"),
+    historyCount: $("historyCount"),
+    historyHint: $("historyHint"),
+    historyToggle: $("historyToggle"),
+    historyClear: $("historyClear"),
   };
 
   // ===== 状态 =====
@@ -458,9 +466,7 @@
   }
 
   // ===== 加载配置状态（当前用户自己的密钥，脱敏） =====
-  let panelConfig = null;
-
-  function goProfile() {
+  let panelConfig = null;  function goProfile() {
     // iframe 场景需要跳顶层窗口
     try {
       window.top.location.href = "/profile";
@@ -1072,6 +1078,8 @@
 
       // 提示词流转步骤不再展示（只出成品图）；merge_info 仍随结果保存，供“传到图库”写入生成参数
       displayResults(images, body, resp.meta || null, resp.merge_info || null);
+      // 服务端已在生成成功时写入历史（每用户保留 20 条），这里只是把面板刷新成最新
+      loadHistory({ silent: true });
     } catch (err) {
       const msg = err?.message || String(err);
       showError(msg);
@@ -1194,9 +1202,209 @@
     show(els.resultGrid);
   }
 
+  // =========================================================================
+  // ===== 生图历史（服务端保留最近 20 条，面板默认展示最近 4 张缩略图） =====
+  // =========================================================================
+  // 默认展示张数与保留上限**由接口下发**（口径唯一定义在 src/lib/studio-presets.ts）。
+  // 这里是兜底默认值，仅在接口没给 preview 时使用，别把它当权威值。
+  let HISTORY_PREVIEW_COUNT = 4;
+  let HISTORY_LIMIT = 20;
+  let historyItems = [];
+  let historyExpanded = false;
+  // 读失败的原因：必须一路带到 renderHistory，否则提示会被后面的正常渲染覆盖，
+  // 用户看到的就是「空列表」——故障与"确实没有历史"长得一模一样。
+  let historyError = "";
+
+  async function loadHistory(opts) {
+    const silent = opts && opts.silent;
+    try {
+      const resp = await apiGet("/api/studio/history");
+      historyItems = Array.isArray(resp && resp.items) ? resp.items : [];
+      if (resp && Number(resp.preview) > 0) HISTORY_PREVIEW_COUNT = Number(resp.preview);
+      if (resp && Number(resp.limit) > 0) HISTORY_LIMIT = Number(resp.limit);
+      historyError = "";
+    } catch (e) {
+      historyItems = [];
+      historyError = e && e.message ? e.message : String(e);
+      // silent 只用来压掉「生图后自动刷新」这种后台调用的噪音，故障本身照记
+      console.warn("[aitag Studio] 生图历史读取失败:", e);
+      if (silent) studioToast("生图历史刷新失败：" + historyError);
+      renderHistory();
+      return;
+    }
+    renderHistory();
+  }
+
+  function renderHistory() {
+    if (!els.historyGrid) return;
+    const total = historyItems.length;
+    const shown = historyExpanded ? total : Math.min(HISTORY_PREVIEW_COUNT, total);
+
+    els.historyGrid.innerHTML = "";
+    historyItems.slice(0, shown).forEach(function (item, idx) {
+      els.historyGrid.appendChild(buildHistoryItem(item, idx));
+    });
+
+    if (els.historyEmpty) {
+      if (total === 0) show(els.historyEmpty);
+      else hide(els.historyEmpty);
+    }
+
+    if (els.historyCount) {
+      setBadge(els.historyCount, total === 0 ? "— 无记录" : total + " 条记录", "badge-neutral");
+    }
+
+    // 超过 4 条才需要「展开全部」
+    if (els.historyToggle) {
+      if (total > HISTORY_PREVIEW_COUNT) {
+        els.historyToggle.textContent = historyExpanded
+          ? "收起（只显示 " + HISTORY_PREVIEW_COUNT + " 张）"
+          : "展开全部（" + total + " 条）";
+        show(els.historyToggle);
+      } else {
+        hide(els.historyToggle);
+      }
+    }
+
+    if (els.historyHint) {
+      els.historyHint.textContent = historyError
+        ? "历史读取失败：" + historyError
+        : total > HISTORY_PREVIEW_COUNT && !historyExpanded
+          ? "仅本人可见 · 已显示最近 " + shown + " / " + total + " 条"
+          : "仅本人可见 · 服务端保留最近 " + HISTORY_LIMIT + " 条";
+    }
+  }
+
+  function buildHistoryItem(item, idx) {
+    const wrap = document.createElement("div");
+    wrap.className = "history-item";
+    wrap.title = (item.prompt || "（无提示词）") + "\n" + new Date(item.create_date).toLocaleString();
+
+    const index = document.createElement("span");
+    index.className = "history-item-index";
+    index.textContent = "#" + (idx + 1);
+    wrap.appendChild(index);
+
+    const img = document.createElement("img");
+    // 缩略图走同一路由的 ?thumb=1（480px WebP），点开才加载原图
+    img.src = item.thumb_url || item.url;
+    img.alt = "生图历史 " + (idx + 1);
+    img.loading = "lazy";
+    img.addEventListener("click", function () {
+      openLightbox(item.url);
+    });
+    wrap.appendChild(img);
+
+    const actions = document.createElement("div");
+    actions.className = "history-item-actions";
+
+    const reuseBtn = document.createElement("button");
+    reuseBtn.type = "button";
+    reuseBtn.className = "history-item-action";
+    reuseBtn.textContent = "复用词";
+    reuseBtn.title = "把这条记录的提示词填回输入框";
+    reuseBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      reuseHistoryPrompt(item);
+    });
+    actions.appendChild(reuseBtn);
+
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "history-item-action is-danger";
+    delBtn.textContent = "删除";
+    delBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      deleteHistoryItem(item, delBtn);
+    });
+    actions.appendChild(delBtn);
+
+    wrap.appendChild(actions);
+    return wrap;
+  }
+
+  function reuseHistoryPrompt(item) {
+    let filled = 0;
+    if (item.prompt) {
+      els.naiPrompt.value = item.prompt;
+      filled++;
+    }
+    if (item.negative) {
+      els.negative.value = item.negative;
+      filled++;
+    }
+    if (!filled) return studioToast("这条记录没有保存提示词");
+    saveCache();
+    studioToast("已填回提示词" + (item.negative ? "与反向词" : ""));
+  }
+
+  async function deleteHistoryItem(item, btn) {
+    if (btn && btn.disabled) return;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "…";
+    }
+    try {
+      const resp = await fetch("/api/studio/history?id=" + encodeURIComponent(item.id), {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+      const data = await resp.json().catch(() => null);
+      if (!resp.ok || !data || !data.ok) {
+        throw new Error((data && data.error) || "HTTP " + resp.status);
+      }
+      historyItems = historyItems.filter(function (x) {
+        return x.id !== item.id;
+      });
+      renderHistory();
+      studioToast("已删除该条历史");
+    } catch (e) {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "删除";
+      }
+      studioToast("删除失败：" + (e && e.message ? e.message : e));
+    }
+  }
+
+  async function clearHistory() {
+    if (!historyItems.length) return studioToast("历史本来就是空的");
+    if (!window.confirm("确定清空全部生图历史吗？图片文件会一起删除，且不可恢复。")) return;
+    if (els.historyClear) els.historyClear.disabled = true;
+    try {
+      const resp = await fetch("/api/studio/history", {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+      const data = await resp.json().catch(() => null);
+      if (!resp.ok || !data || !data.ok) {
+        throw new Error((data && data.error) || "HTTP " + resp.status);
+      }
+      historyItems = [];
+      historyExpanded = false;
+      renderHistory();
+      studioToast("已清空 " + (data.deleted || 0) + " 条历史");
+    } catch (e) {
+      studioToast("清空失败：" + (e && e.message ? e.message : e));
+    } finally {
+      if (els.historyClear) els.historyClear.disabled = false;
+    }
+  }
+
+  function initHistory() {
+    if (!els.historyGrid) return;
+    if (els.historyToggle) {
+      els.historyToggle.addEventListener("click", function () {
+        historyExpanded = !historyExpanded;
+        renderHistory();
+      });
+    }
+    if (els.historyClear) els.historyClear.addEventListener("click", clearHistory);
+    loadHistory();
+  }
+
   // ===== 图片放大 =====
-  function openLightbox(src) {
-    const lb = document.createElement("div");
+  function openLightbox(src) {    const lb = document.createElement("div");
     lb.className = "lightbox";
     const img = document.createElement("img");
     img.src = src;
@@ -1515,6 +1723,7 @@
     updateSizeOptionsUI();
     toggleCustomArtists();
     setCallFormat(currentCallFormat);
+    initHistory();
     await loadTokenStatus();
   }
 

@@ -15,7 +15,7 @@ export default async function StudioPage() {
   await requireLogin();
   return (
     <iframe
-      src="/studio/index.html?v=1.3.2"
+      src="/studio/index.html?v=1.4.0"
       title="生图台"
       className="studio-frame"
       allow="clipboard-write"

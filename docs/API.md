@@ -278,6 +278,29 @@ Query 参数：
 
 ---
 
+### 4.5.4 生图历史 `GET/DELETE /api/studio/history`、`GET /api/studio/history/[id]`
+需登录。**一律按当前登录用户过滤**，不接受客户端传 userId。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/studio/history` | `{ "ok": true, "items": [...], "limit": 20, "preview": 4 }` |
+| DELETE | `/api/studio/history` | 清空当前用户全部历史（含磁盘图片）→ `{ "ok": true, "deleted": N }` |
+| DELETE | `/api/studio/history?id=<id>` | 删除单条 → `{ "ok": true, "deleted": 1 }`；不存在或非本人 → `404` |
+| GET | `/api/studio/history/[id]` | 取历史图（原图）；`?thumb=1` 取 480px WebP 缩略图 |
+
+- `items[]` 字段：`{ id, url, thumb_url, ext, backend, model, size, prompt, negative, create_date }`。
+  `url`/`thumb_url` 都指向本接口（图片存 `data/uploads/hist/`，不在 `public/` 下）。
+- **保留 20 条**（`STUDIO_HISTORY_LIMIT`）：`POST /api/studio/generate` 成功后自动入库，
+  超出后从旧到新裁剪，**库记录与磁盘文件一起删**（避免孤儿文件无限堆积）。
+- 图片响应带 `Cache-Control: private, no-cache` + `ETag`：`If-None-Match` 命中返 `304`。
+  ⚠️ 这里**刻意不用 `max-age`** —— 实测长缓存会让浏览器在记录已删除后继续显示旧图（服务端已 404）。
+- 单条越权与不存在**都返回 404**（不区分，避免用 id 探测他人是否有该记录）。
+- 每条记录的提示词截断存储（正向 8000 / 反向 4000）。
+- ⚠️ `POST /api/me/studio` 的 `probe:"openai"` 也会真实生图，但它**不写入历史**
+  （语义是"验证密钥"而非用户创作，否则每次保存设置都会往历史塞一张测试图）。
+
+---
+
 ## 5. 其他
 
 - `GET /api/config`（公开）：`{ "site_name", "image_prefix", "languages", "default_language", "upload_enabled" }`
@@ -301,6 +324,7 @@ Query 参数：
 
 | 日期 | 变更 | 影响 |
 |---|---|---|
+| 2026-09-21 | **生图台新增「生图历史」**：`GET/DELETE /api/studio/history` + `GET /api/studio/history/[id]`；生成成功后自动入库（每用户保留 20 条，超出裁剪并删文件）；面板结果卡下方新增历史卡片，默认展示最近 4 张缩略图、可展开全部 | 新增 `studio_history` 表与 `data/uploads/hist/`（原图 + 480px WebP 缩略图）；图片存文件、库里只存文件名，库不会膨胀；历史图**需登录且仅本人可见** |
 | 2026-09-21 | **游客可只读浏览**：画廊 `/api/works`、详情 `/api/works/[id]` 不再要求登录；生图台/上传/个人资料仍 307 跳登录；游客点赞收藏与删除仍 401。游客无账号偏好，**强制套用 R18G 推荐默认屏蔽组** | 匿名访客能看到画廊（默认屏蔽重口内容）；`/api/works` 从「需登录」变成公开接口，别再用它做鉴权探针 |
 | 2026-09-18 | 新增 `POST /api/me/nickname`（修改昵称）：昵称即作品作者名，改名与「同步本人全部作品作者名」在同一事务内完成；昵称不得与他人用户名或昵称重复，系统保留名与泛用作者名（群友/匿名/游客/guest）禁用 | 上传接口的作者名从「登录用户名」改为「账号昵称」（未设昵称行为不变）；`/u/[handle]` 支持用昵称访问；删除权限判定改为昵称或用户名任一命中 |
 | 2026-09-14 | 新增 `GET /api/studio/tags`：面板词库改为服务端 WeiLin 中文词库（11 分类 / 132 分组 / 4086 标签，另有 2.2 万条 danbooru 中文可检索）；未同步时面板自动回退自带起始库 | 标签管理从「起始库」变成真实词库；`data/taglib.db` 不进仓库，由部署脚本单独同步 |

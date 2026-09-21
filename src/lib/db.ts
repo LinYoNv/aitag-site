@@ -9,6 +9,7 @@ import crypto from "node:crypto";
 import type { Work, WorkListItem, PagedWorks } from "./types";
 import { toThumbUrl } from "./format";
 import type { R18GPref } from "./r18g-tags";
+import { STUDIO_HISTORY_LIMIT as STUDIO_HISTORY_LIMIT_PRESET } from "./studio-presets";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "aitag.db");
@@ -96,6 +97,25 @@ export function getDb(): DatabaseSync {
         create_date TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_view_logs_user_work ON view_logs(user_id, work_id, create_date);
+
+      -- 生图台历史（每个用户保留最近 N 张，见 STUDIO_HISTORY_LIMIT）
+      -- 图片文件落在 data/uploads/hist/（原图）与 data/uploads/hist/thumb/（缩略图），
+      -- 库里只存文件名，不存 base64 —— 否则一张图几百 KB 的字符串会把库撑爆、每次读列表都要全量解析。
+      CREATE TABLE IF NOT EXISTS studio_history (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        file TEXT NOT NULL,          -- 原图文件名（data/uploads/hist/ 下）
+        thumb TEXT NOT NULL,         -- 缩略图文件名（data/uploads/hist/thumb/ 下，WebP）
+        ext TEXT NOT NULL DEFAULT 'png',
+        backend TEXT NOT NULL DEFAULT '',   -- 'direct' | 'openai'
+        model TEXT NOT NULL DEFAULT '',
+        size TEXT NOT NULL DEFAULT '',
+        prompt TEXT NOT NULL DEFAULT '',    -- 正向提示词（截断存储）
+        negative TEXT NOT NULL DEFAULT '',
+        meta TEXT,                          -- 生成参数 JSON（与「传到图库」同口径）
+        create_date TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_studio_history_user ON studio_history(user_id, create_date DESC);
     `);
     // 兼容已存在的 works 表（旧库没有 total_likes 列）
     const wcols = db
@@ -901,4 +921,122 @@ export function deleteWorkSideRecords(workId: string): void {
 export function workExists(id: string): boolean {
   const d = getDb();
   return !!d.prepare("SELECT 1 FROM works WHERE id = ?").get(id);
+}
+
+// ============================================================================
+// 生图台历史
+// ============================================================================
+
+/** 每个用户保留的生图记录条数（口径定义在 studio-presets，前端也读同一个常量） */
+export const STUDIO_HISTORY_LIMIT = STUDIO_HISTORY_LIMIT_PRESET;
+
+export interface StudioHistoryRow {
+  id: string;
+  user_id: string;
+  file: string;
+  thumb: string;
+  ext: string;
+  backend: string;
+  model: string;
+  size: string;
+  prompt: string;
+  negative: string;
+  meta: string | null;
+  create_date: string;
+}
+
+function rowToStudioHistory(row: Record<string, unknown>): StudioHistoryRow {
+  return {
+    id: String(row.id),
+    user_id: String(row.user_id),
+    file: String(row.file),
+    thumb: String(row.thumb),
+    ext: String(row.ext ?? "png"),
+    backend: String(row.backend ?? ""),
+    model: String(row.model ?? ""),
+    size: String(row.size ?? ""),
+    prompt: String(row.prompt ?? ""),
+    negative: String(row.negative ?? ""),
+    meta: (row.meta as string | null) ?? null,
+    create_date: String(row.create_date),
+  };
+}
+
+/** 新增一条生图历史 */
+export function insertStudioHistory(entry: Omit<StudioHistoryRow, "create_date"> & { create_date?: string }): void {
+  const d = getDb();
+  d.prepare(
+    `INSERT INTO studio_history (id, user_id, file, thumb, ext, backend, model, size, prompt, negative, meta, create_date)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    entry.id,
+    entry.user_id,
+    entry.file,
+    entry.thumb,
+    entry.ext,
+    entry.backend,
+    entry.model,
+    entry.size,
+    entry.prompt,
+    entry.negative,
+    entry.meta,
+    entry.create_date ?? new Date().toISOString(),
+  );
+}
+
+/** 列出某用户的生图历史（新→旧） */
+export function listStudioHistory(userId: string, limit = STUDIO_HISTORY_LIMIT): StudioHistoryRow[] {
+  const d = getDb();
+  const rows = d
+    .prepare(
+      `SELECT * FROM studio_history WHERE user_id = ?
+       ORDER BY create_date DESC, rowid DESC LIMIT ?`,
+    )
+    .all(userId, Math.max(1, Math.min(200, Math.floor(limit)))) as Array<Record<string, unknown>>;
+  return rows.map(rowToStudioHistory);
+}
+
+/** 取单条（带归属校验：非本人返回 null，避免越权读别人提示词） */
+export function getStudioHistory(userId: string, id: string): StudioHistoryRow | null {
+  const d = getDb();
+  const row = d
+    .prepare(`SELECT * FROM studio_history WHERE id = ? AND user_id = ?`)
+    .get(id, userId) as Record<string, unknown> | undefined;
+  return row ? rowToStudioHistory(row) : null;
+}
+
+/**
+ * 裁剪到 keep 条：删掉多余的库记录，并**返回被删的行**。
+ * 文件删除由调用方负责（本层不碰磁盘），返回行是为了让调用方能清掉对应图片，
+ * 否则库裁了、盘上图片会无限堆积。
+ */
+export function pruneStudioHistory(userId: string, keep = STUDIO_HISTORY_LIMIT): StudioHistoryRow[] {
+  const d = getDb();
+  const rows = d
+    .prepare(
+      `SELECT * FROM studio_history WHERE user_id = ?
+       ORDER BY create_date DESC, rowid DESC LIMIT -1 OFFSET ?`,
+    )
+    .all(userId, Math.max(0, keep)) as Array<Record<string, unknown>>;
+  if (!rows.length) return [];
+  const victims = rows.map(rowToStudioHistory);
+  const del = d.prepare(`DELETE FROM studio_history WHERE id = ?`);
+  for (const v of victims) del.run(v.id);
+  return victims;
+}
+
+/** 删除单条（返回被删的行，供调用方清理文件；不属本人则返回 null） */
+export function deleteStudioHistory(userId: string, id: string): StudioHistoryRow | null {
+  const row = getStudioHistory(userId, id);
+  if (!row) return null;
+  getDb().prepare(`DELETE FROM studio_history WHERE id = ?`).run(id);
+  return row;
+}
+
+/** 全量删除某用户的历史（返回被删的行，供清理文件） */
+export function clearStudioHistory(userId: string): StudioHistoryRow[] {
+  const rows = listStudioHistory(userId, 200);
+  if (!rows.length) return [];
+  getDb().prepare(`DELETE FROM studio_history WHERE user_id = ?`).run(userId);
+  return rows;
 }
