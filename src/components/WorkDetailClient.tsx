@@ -12,9 +12,11 @@ interface Props {
   work: Work;
   canDelete?: boolean;
   isAdmin?: boolean;
+  /** 游客态：可以看，但点赞/收藏/删除一律引导去登录 */
+  isGuest?: boolean;
 }
 
-export default function WorkDetailClient({ work, canDelete, isAdmin }: Props) {
+export default function WorkDetailClient({ work, canDelete, isAdmin, isGuest }: Props) {
   const [deleting, setDeleting] = useState(false);
   const [deleteMsg, setDeleteMsg] = useState("");
   const [liked, setLiked] = useState(work.user_liked ?? false);
@@ -46,6 +48,11 @@ export default function WorkDetailClient({ work, canDelete, isAdmin }: Props) {
   // 点赞 / 收藏 toggle
   const handleAction = useCallback(
     async (action: "like" | "bookmark") => {
+      // 游客：直接引导去登录，不做乐观更新（否则数字会先跳一下再回滚）
+      if (isGuest) {
+        window.location.href = "/login";
+        return;
+      }
       setActionMsg("");
       const isActive = action === "like" ? liked : bookmarked;
       // 乐观更新
@@ -94,7 +101,7 @@ export default function WorkDetailClient({ work, canDelete, isAdmin }: Props) {
         setActionMsg("网络错误");
       }
     },
-    [work.id, liked, bookmarked],
+    [work.id, liked, bookmarked, isGuest],
   );
 
   async function handleDelete() {

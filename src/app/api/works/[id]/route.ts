@@ -34,10 +34,7 @@ function backfillArtists(work: { metadata: unknown }): void {
 }
 
 export async function GET(_req: NextRequest, { params }: Params) {
-  const user = await currentUser();
-  if (!user) {
-    return NextResponse.json({ error: "未登录" }, { status: 401 });
-  }
+  // 详情对游客开放（只读）；下方 DELETE 仍然强制登录
   const { id } = await params;
   const work = getWorkById(id);
   if (!work) {

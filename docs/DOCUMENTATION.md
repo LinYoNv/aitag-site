@@ -48,7 +48,8 @@ systemctl reload <反代服务>    # 改反代配置后重载
 4. 服务器部署：`rm -rf <部署目录>/.next && cp -r .next/standalone/.next <部署目录>/.next && cp .next/standalone/server.js <部署目录>/server.js && rm -rf <部署目录>/node_modules && cp -r .next/standalone/node_modules <部署目录>/node_modules && mkdir -p <部署目录>/.next/static && cp -r .next/static/. <部署目录>/.next/static/`
 5. `systemctl restart <服务名>`（反代无需动，仍反代内部端口）
 ⚠️ **必须拷 `.next/static`**（standalone 产物不含它）；⚠️ **不要覆盖** `<部署目录>/data/` 与 `public/images/`（用户数据）。
-💡 健康检查：`curl -s -o /dev/null -w "%{http_code}" https://<站点域名>/login`（预期 200；**接口均需登录**，不要用 `/api/*` 做健康检查）。
+💡 健康检查：`curl -s -o /dev/null -w "%{http_code}" https://<站点域名>/login`（预期 200）。
+⚠️ 游客开放后 `/api/works` **不再要求登录**，健康检查别拿它当「需要鉴权」的探针。
 
 ---
 
@@ -58,7 +59,7 @@ systemctl reload <反代服务>    # 改反代配置后重载
 |---|---|---|
 | 登录 | 用户名+密码，session cookie（30 天，httpOnly+lax） | `/login` |
 | 注册 | 开放注册，普通 user；用户名 2-30 字符（字母数字下划线中文），密码≥8；**用户名查重与登录均大小写不敏感**（Admin/admin 同名），且禁用系统保留名（admin/root/官方/客服 等，防冒充——用户名默认作为作品作者名展示） | `/register` |
-| 整站门控 | 未登录访问任何页面 → 307 跳 `/login` | 全局 |
+| 门控 | **游客可只读浏览**画廊 `/`、作品详情 `/i/[id]`、用户主页 `/u/[handle]`；生图台 `/studio`、上传 `/upload`、个人资料 `/profile` **未登录 307 跳 `/login`** | 全局 |
 | 画廊 | 栅格展示 + 搜索（ID/作者/标签/参数/正向prompt）+ **屏蔽 tag（黑名单）** + 排序（最新/最旧/最多收藏）+ 分页 + 悬浮预览 + **缩略图**（480px WebP 懒加载） | `/` |
 | 作品详情 | 多图 Grid 卡片（**1400px WebP 预览图**），每图参数一体（指令/JSON 切换 + Prompt/Negative/画师复制 + **图片下载按钮**），**灯箱放大**（←→/按钮/触屏滑动切换 + 右侧参数面板） | `/i/[id]` |
 | 互动 | 点赞(👍)/收藏(⭐)/浏览量(👁)；浏览量 10 分钟窗口去重（同用户同作品不重复计数） | 详情页 |
@@ -83,7 +84,9 @@ systemctl reload <反代服务>    # 改反代配置后重载
 > 类型只保留 NovelAI（nai）、ComfyUI（comfyui）、自定义（other）；**SD / NAI-X 选项已从 UI 移除**（底层 AiType 仍兼容 sd/nai_x）。
 
 **权限规则**：
-- `requireLogin()`（`src/lib/guard.ts`）：未登录 `redirect('/login')` —— 所有页面 + 部分 API
+- `requireLogin()`（`src/lib/guard.ts`）：未登录 `redirect('/login')` —— **写操作页面**（studio/upload/profile）
+- `optionalUser()`：游客可读页面用它（画廊/详情/主页），未登录返回 `null` 而**不跳转**
+- 游客没有账号偏好，R18G 一律走 `blockedTagsFor(null)` → **推荐默认屏蔽组**（不能因为没偏好就全放行）
 - `/api/works`（列表）**不要求登录**（页面层已门控，可接受）
 - `/api/upload`：**session 或 API Token 二选一**，作者=账号（取账号**昵称**，未设昵称时回退登录用户名；忽略表单 author_name）
 - `DELETE /api/works/[id]`：admin 可删全部；否则作品作者名命中本人**昵称或登录用户名**才可删（`isOwnAuthorName`，改名后不丢权限），越权 403
@@ -153,12 +156,12 @@ systemctl reload <反代服务>    # 改反代配置后重载
 
 | 路径 | 类型 | 说明 |
 |---|---|---|
-| `/` | 动态 | 画廊（requireLogin → GalleryPage） |
+| `/` | 动态 | 画廊（**游客可看**；GalleryPage 的 `user` 为 null 时走游客态） |
 | `/login` `/register` | 动态 | 已登录访问则 redirect `/` |
 | `/upload` | 动态 | 上传页（requireLogin） |
-| `/i/[id]` | 动态 | 详情页（requireLogin + canDelete/isAdmin） |
+| `/i/[id]` | 动态 | 详情页（**游客可看**；游客 canDelete=false、点赞收藏引导登录） |
 | `/profile` | 动态 | 个人资料（requireLogin）：换头像 + 信息 + **修改昵称** + 修改密码 + API Token + **生图台密钥** + R18G 屏蔽偏好 |
-| `/u/[handle]` | 动态 | 用户主页（requireLogin，参照 Pixiv）：资料卡 + 统计 + 作品\|收藏 Tab；handle 支持**用户名或昵称**（`getUserByHandle`） |
+| `/u/[handle]` | 动态 | 用户主页（**游客可看**，参照 Pixiv）：资料卡 + 统计 + 作品\|收藏 Tab；handle 支持**用户名或昵称**（`getUserByHandle`） |
 | `/studio` | 动态 | 生图台入口（requireLogin）：全屏内嵌 `public/studio/index.html` 面板（独立静态页，API 层走 `/api/studio/*`） |
 
 ---
@@ -240,10 +243,10 @@ systemctl reload <反代服务>    # 改反代配置后重载
 |---|---|
 | `layout.tsx` | 根布局（html/body，全局 CSS） |
 | `globals.css` | 全局样式（Tailwind + CSS 变量 + type-pill 等） |
-| `page.tsx` | 首页：requireLogin → `<GalleryPage user={...}>` |
+| `page.tsx` | 首页：`optionalUser()` → `<GalleryPage user={... \| null}>`（null = 游客） |
 | `login/page.tsx` `register/page.tsx` | 登录/注册页（已登录 redirect `/`） |
 | `upload/page.tsx` | 上传页：requireLogin → `<UploadPageClient user={...}>` |
-| `i/[id]/page.tsx` | 详情页：requireLogin + 算 canDelete/isAdmin → `<WorkDetailClient>` |
+| `i/[id]/page.tsx` | 详情页：`optionalUser()` + 算 canDelete/isAdmin/isGuest → `<WorkDetailClient>` |
 | `profile/page.tsx` | 个人资料：requireLogin → `<ProfileClient>` |
 | `u/[username]/page.tsx` | 用户主页：requireLogin + `getUserByHandle`（**decodeURIComponent 解码中文句柄**，按用户名或昵称解析）→ `<UserPageClient>`（资料卡+统计+作品/收藏；作品与统计按「昵称 + 用户名」两个别名取并集） |
 
@@ -389,6 +392,9 @@ systemctl reload <反代服务>    # 改反代配置后重载
 ---
 
 ## 9. 待办 / 路线（留档）
+
+> 📌 **活跃待办已移到根目录 [`TODO.md`](../TODO.md)** —— 情绪指定的改动与已知暂缓问题都记在那里，接手前先看它。
+> 本节只留历史路线存档。
 
 1. ~~（后续）用户/作者详情页~~ → **已完成 2026-09-05**：`/u/[username]` 参照 Pixiv 布局（资料卡+统计+作品|收藏 Tab），入口在 UserBadge「我的主页」与详情页作者名链接。
 2. （可选）头像从下拉菜单直接上传（目前入口在 `/profile`）。

@@ -183,6 +183,32 @@ export function defaultHiddenTags(): string[] {
   return [...set];
 }
 
+/**
+ * 浏览者 → 应屏蔽的正向 tag 列表（**全站统一入口**）。
+ *
+ * 三种情况：
+ * - `pref === null`（游客，没有账号偏好）→ 用**推荐默认组**兜底。
+ *   开放游客浏览后这一步是必需的：不兜底就等于把重口内容直接摊给全网。
+ * - 已登录且开了总开关 → 勾选词 + 自定义词；一个都没勾时同样用默认组
+ *   （保证「开关一开就有用」，与既有行为一致）。
+ * - 已登录但没开总开关 → 不屏蔽。
+ *
+ * 抽成一处是为了避免「每个页面各写一遍、漏一个页面就静默失效」。
+ */
+export function blockedTagsFor(
+  pref:
+    | { enabled: boolean; selected: string[]; custom: string[] }
+    | null
+    | undefined,
+): string[] {
+  if (!pref) return defaultHiddenTags();
+  if (!pref.enabled) return [];
+  const hasSelection = pref.selected.length > 0 || pref.custom.length > 0;
+  return hasSelection
+    ? expandHiddenTags(pref.selected, pref.custom)
+    : defaultHiddenTags();
+}
+
 /** 用户勾选展开：selected（预置 tag）+ custom（自定义词）合并去重小写 */
 export function expandHiddenTags(
   selected: string[],

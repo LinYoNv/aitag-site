@@ -484,7 +484,8 @@ export default function ProfileClient({ user }: Props) {
                 {msg.text}
               </p>
             )}
-            {/* 昵称编辑面板：随「修改昵称」按钮展开，与下方信息表里的入口共用同一套状态 */}
+            {/* 昵称编辑面板：全站唯一的改名入口（此前信息表「昵称」行还有一个重复的
+                「修改」按钮，已按要求移除）。成功后 router.refresh() 让头部昵称跟着更新。 */}
             {nickEditing && (
               <div className="mt-4 w-full max-w-sm">
                 <label className="block text-xs text-[#aeb6c2] mb-1.5 text-left" htmlFor="nicknameInput">
@@ -540,12 +541,14 @@ export default function ProfileClient({ user }: Props) {
                   2–30 字符（字母 / 数字 / 下划线 / 中文）；会同步到你全部作品的作者名；
                   不可与他人重名，也不能用系统保留名
                 </p>
-                {nickMsg && (
-                  <p className={`text-[11px] mt-1.5 ${nickMsg.ok ? "text-green-400" : "text-red-400"}`}>
-                    {nickMsg.text}
-                  </p>
-                )}
               </div>
+            )}
+            {/* ⚠️ 提示必须放在 nickEditing 块**外面**：保存成功时会先 setNickEditing(false)
+                把面板收起，若提示在块内就永远不会渲染（成功提示凭空消失）。 */}
+            {nickMsg && (
+              <p className={`mt-2 text-sm ${nickMsg.ok ? "text-green-400" : "text-red-400"}`}>
+                {nickMsg.text}
+              </p>
             )}
           </div>
 
@@ -567,80 +570,13 @@ export default function ProfileClient({ user }: Props) {
                 )}
               </dd>
             </div>
-            <div className="flex justify-between items-start gap-3 border-b border-[#262b36] pb-3">
-              <dt className="text-[#aeb6c2] shrink-0 pt-1.5">昵称</dt>
-              <dd className="text-[#e6edf3] text-right flex-1 min-w-0">
-                {nickEditing ? (
-                  <div className="flex flex-col items-end gap-2">
-                    <input
-                      type="text"
-                      value={nickDraft}
-                      onChange={(e) => setNickDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          void saveNickname();
-                        } else if (e.key === "Escape") {
-                          setNickEditing(false);
-                          setNickDraft(nickname);
-                          setNickMsg(null);
-                        }
-                      }}
-                      maxLength={30}
-                      disabled={nickSaving}
-                      autoFocus
-                      spellCheck={false}
-                      aria-label="新昵称"
-                      className="w-full bg-[#0f1218] border border-[#262b36] rounded-lg px-3 py-1.5 text-sm text-[#e6edf3] outline-none focus:border-[#4c9fff] disabled:opacity-50"
-                    />
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-[#5a6270]">
-                        {Array.from(nickDraft.trim()).length}/30
-                      </span>
-                      <button
-                        onClick={() => void saveNickname()}
-                        disabled={nickSaving || !nickDraft.trim()}
-                        className="text-xs bg-[#4c9fff] text-white px-3 py-1.5 rounded-lg hover:opacity-90 disabled:opacity-50"
-                      >
-                        {nickSaving ? "保存中…" : "保存"}
-                      </button>
-                      <button
-                        onClick={() => {
-                          setNickEditing(false);
-                          setNickDraft(nickname);
-                          setNickMsg(null);
-                        }}
-                        disabled={nickSaving}
-                        className="text-xs bg-[#151922] border border-[#262b36] text-[#e6edf3] px-3 py-1.5 rounded-lg hover:border-[#4c9fff] disabled:opacity-50"
-                      >
-                        取消
-                      </button>
-                    </div>
-                    <p className="text-[11px] text-[#5a6270] leading-relaxed text-right">
-                      2–30 字符（字母 / 数字 / 下划线 / 中文）；会同步到你全部作品的作者名；
-                      不可与他人重名，也不能用系统保留名
-                    </p>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-end gap-2">
-                    <span className="truncate">{nickname}</span>
-                    <button
-                      onClick={() => {
-                        setNickDraft(nickname);
-                        setNickMsg(null);
-                        setNickEditing(true);
-                      }}
-                      className="shrink-0 text-xs text-[#4c9fff] hover:underline"
-                    >
-                      修改
-                    </button>
-                  </div>
-                )}
-                {nickMsg && (
-                  <p className={`text-[11px] mt-1 ${nickMsg.ok ? "text-green-400" : "text-red-400"}`}>
-                    {nickMsg.text}
-                  </p>
-                )}
+            {/* 昵称只读展示：修改入口统一放在头像下方的「修改昵称」按钮，
+                这里不再重复放第二个入口（原「修改」小按钮已移除）。
+                nickMsg 也一并交给头像区显示，避免同一提示出现在两处。 */}
+            <div className="flex justify-between border-b border-[#262b36] pb-3">
+              <dt className="text-[#aeb6c2]">昵称</dt>
+              <dd className="text-[#e6edf3] min-w-0">
+                <span className="block truncate">{nickname}</span>
               </dd>
             </div>
             <div className="flex justify-between">

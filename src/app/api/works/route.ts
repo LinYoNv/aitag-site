@@ -1,16 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listWorks, getUserPref } from "@/lib/db";
 import { currentUser } from "@/lib/auth";
-import { expandHiddenTags, defaultHiddenTags } from "@/lib/r18g-tags";
+import { blockedTagsFor } from "@/lib/r18g-tags";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  // 与整站门控一致：列表接口也要求登录（防未登录拉全量作品元数据）
+  // 画廊对游客开放（只读）：未登录不再 401，但一定套用下面的 R18G 默认屏蔽。
   const user = await currentUser();
-  if (!user) {
-    return NextResponse.json({ error: "未登录" }, { status: 401 });
-  }
   const sp = req.nextUrl.searchParams;
   const q = sp.get("q") ?? undefined;
   const prompt = sp.get("prompt") ?? undefined;
@@ -23,15 +20,8 @@ export async function GET(req: NextRequest) {
   const page_size = Number(sp.get("page_size") ?? "24");
 
   // 账号偏好：开启 R18G 屏蔽时，把勾选的 tag + 自定义词展开成屏蔽词（只匹配正向 prompt）。
-  // 从未选过任何词时用推荐默认（粪便 + 纯兽人），保证开关一开就有用。
-  const pref = getUserPref(user.id);
-  let blockedPosTags: string[] = [];
-  if (pref.enabled) {
-    const hasSelection = pref.selected.length > 0 || pref.custom.length > 0;
-    blockedPosTags = hasSelection
-      ? expandHiddenTags(pref.selected, pref.custom)
-      : defaultHiddenTags();
-  }
+  // **游客（user 为 null）用推荐默认组兜底** —— 「没有账号偏好」不等于「什么都给看」。
+  const blockedPosTags = blockedTagsFor(user ? getUserPref(user.id) : null);
 
   // 画廊「屏蔽 tag」黑名单（搜索框旁输入，逗号分隔）：上限 20 词 ×40 字符，
   // 防止拼出海量 has_pos_tag 调用拖垮列表查询

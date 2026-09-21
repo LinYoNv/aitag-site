@@ -10,9 +10,11 @@ interface Props {
   avatar?: string;
   /** 昵称（= 作品作者名）；不传时回退到用户名 */
   displayName?: string;
+  /** 游客态：不显示下拉菜单，整个按钮就是一个「登录 / 注册」入口 */
+  guest?: boolean;
 }
 
-export default function UserBadge({ username, isAdmin, avatar, displayName }: Props) {
+export default function UserBadge({ username, isAdmin, avatar, displayName, guest }: Props) {
   const name = displayName?.trim() || username;
   const [open, setOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -37,6 +39,24 @@ export default function UserBadge({ username, isAdmin, avatar, displayName }: Pr
     } catch {
       setLoggingOut(false);
     }
+  }
+
+  // 游客态：头像位置直接当登录入口用（不弹菜单，避免出现「我的主页/个人资料/登出」
+  // 这些游客点了也只会被弹回登录页的菜单项）
+  if (guest) {
+    return (
+      <Link
+        href="/login"
+        className="shrink-0 ml-auto flex items-center gap-2 rounded-full border border-[#262b36] hover:border-[#4c9fff] transition-colors pl-3 pr-1 py-0.5"
+        aria-label="登录或注册"
+        title="登录 / 注册"
+      >
+        <span className="text-sm text-[#aeb6c2] whitespace-nowrap">登录 / 注册</span>
+        <span className="w-8 h-8 rounded-full overflow-hidden">
+          <DefaultAvatar />
+        </span>
+      </Link>
+    );
   }
 
   return (

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import GalleryCard from "@/components/GalleryCard";
 import UserBadge from "@/components/UserBadge";
 import type { PagedWorks } from "@/lib/types";
@@ -12,7 +13,9 @@ interface UserInfo {
   avatar?: string;
 }
 
-export default function GalleryPage({ user }: { user: UserInfo }) {
+/** user 为 null = 游客（只读浏览，生图台/上传/头像都引导去登录） */
+export default function GalleryPage({ user }: { user: UserInfo | null }) {
+  const guest = !user;
   const [q, setQ] = useState("");
   const [input, setInput] = useState("");
   const [blockTags, setBlockTags] = useState("");
@@ -133,23 +136,27 @@ export default function GalleryPage({ user }: { user: UserInfo }) {
             <option value="bookmarks">最多收藏</option>
           </select>
         </div>
-        <a
-          href="/studio"
+        {/* 生图台 / 上传：游客点了直接去登录（这两个页面本身也有服务端门控，这里只是少走一跳） */}
+        <Link
+          href={guest ? "/login" : "/studio"}
+          title={guest ? "登录后可进入生图台" : undefined}
           className="bg-[#151922] border border-[#262b36] text-[#e6edf3] text-sm max-sm:text-xs px-3 sm:px-4 py-1.5 rounded-lg hover:border-[#d9c700] hover:text-[#d9c700] whitespace-nowrap"
         >
           🎨 生图台
-        </a>
-        <a
-          href="/upload"
+        </Link>
+        <Link
+          href={guest ? "/login" : "/upload"}
+          title={guest ? "登录后可上传作品" : undefined}
           className="bg-[#151922] border border-[#262b36] text-[#e6edf3] text-sm max-sm:text-xs px-3 sm:px-4 py-1.5 rounded-lg hover:border-[#4c9fff] whitespace-nowrap"
         >
           + 上传
-        </a>
+        </Link>
         <UserBadge
-          username={user.username}
-          isAdmin={user.role === "admin"}
-          avatar={user.avatar}
-          displayName={user.author_name}
+          guest={guest}
+          username={guest ? "" : user!.username}
+          isAdmin={!guest && user!.role === "admin"}
+          avatar={guest ? undefined : user!.avatar}
+          displayName={guest ? undefined : user!.author_name}
         />
       </header>
 

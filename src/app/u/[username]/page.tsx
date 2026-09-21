@@ -1,9 +1,8 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getUserByHandle, getUserStats, listWorks, listBookmarkedWorks, getUserPref } from "@/lib/db";
-import { requireLogin } from "@/lib/guard";
-import { currentUser } from "@/lib/auth";
-import { expandHiddenTags, defaultHiddenTags } from "@/lib/r18g-tags";
+import { optionalUser } from "@/lib/guard";
+import { blockedTagsFor } from "@/lib/r18g-tags";
 import UserPageClient from "@/components/UserPageClient";
 
 export const dynamic = "force-dynamic";
@@ -22,19 +21,12 @@ export default async function UserPage({
   } catch {
     // 保持原值
   }
-  // 登录拦截（主页需登录才能访问，返回值仅用于权限校验）
-  await requireLogin();
 
-  // 当前浏览者（用于 R18G 屏蔽：用户主页作品/收藏列表也遵循浏览者偏好）
-  const viewer = await currentUser();
-  const pref = viewer ? getUserPref(viewer.id) : null;
-  let blockedPosTags: string[] = [];
-  if (pref?.enabled) {
-    const hasSelection = pref.selected.length > 0 || pref.custom.length > 0;
-    blockedPosTags = hasSelection
-      ? expandHiddenTags(pref.selected, pref.custom)
-      : defaultHiddenTags();
-  }
+  // 用户主页对游客开放（只读）
+  // 当前浏览者（用于 R18G 屏蔽：用户主页作品/收藏列表也遵循浏览者偏好）；
+  // 游客没有账号偏好 → blockedTagsFor 会套用推荐默认组
+  const viewer = await optionalUser();
+  const blockedPosTags = blockedTagsFor(viewer ? getUserPref(viewer.id) : null);
 
   // 按句柄解析：用户名或昵称都能打开（详情页的作者链接用的是作品作者名=昵称）
   const user = getUserByHandle(username);
