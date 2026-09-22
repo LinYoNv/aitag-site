@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>生图台 · 图像合成与测试终端</title>
-  <link rel="stylesheet" href="./app.css?v=1.4.0" />
-  <link rel="stylesheet" href="./taglib.css?v=1.4.0" />
+  <link rel="stylesheet" href="./app.css?v=1.5.0" />
+  <link rel="stylesheet" href="./taglib.css?v=1.5.0" />
 </head>
 <body>
   <!-- 终末地等高线动态地形 Canvas + 底部工业网格 -->
@@ -632,7 +632,7 @@
           </div>
         </div>
 
-        <!-- 生图历史：展示最近 4 张缩略图（服务端保留 20 条记录） -->
+        <!-- 生图历史：展示最近 20 张缩略图（每行 4 张）·勾选后可批量带到上传页 -->
         <div class="card tactical-card acrylic-card" id="historyCard">
           <div class="card-header acrylic-header">
             <div class="card-num-box">
@@ -655,9 +655,13 @@
               <span>暂无生图记录，生成第一张图后会自动出现在这里。</span>
             </div>
             <div class="history-foot">
-              <span id="historyHint" class="history-hint">仅本人可见 · 服务端保留最近 20 条</span>
+              <span id="historyHint" class="history-hint">仅本人可见 · 保留最近 20 条</span>
               <div class="history-actions">
-                <button id="historyToggle" type="button" class="btn-chip hidden">展开全部</button>
+                <!-- 勾选缩略图上的复选框后启用：一键把选中的图带到上传页 -->
+                <button id="historyUpload" type="button" class="btn-chip is-upload" disabled
+                  title="勾选下方缩略图后可批量上传">
+                  ⇧ 上传
+                </button>
                 <button id="historyClear" type="button" class="btn-chip is-danger">✕ 清空历史</button>
               </div>
             </div>
@@ -667,7 +671,7 @@
     </main>
   </div>
 
-  <script src="./taglib.js?v=1.4.0"></script>
-  <script src="./app.js?v=1.4.0"></script>
+  <script src="./taglib.js?v=1.5.0"></script>
+  <script src="./app.js?v=1.5.0"></script>
 </body>
 </html>

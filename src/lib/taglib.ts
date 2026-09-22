@@ -139,6 +139,50 @@ export function searchBooru(query: string, limit = 60): TagLibTag[] {
   }
 }
 
+/**
+ * 批量精确查中文 —— 给面板的「已选提示词气泡」做中文对照用。
+ *
+ * 与 searchBooru 的区别：这里是**精确匹配**（tag 名全等、大小写不敏感），不是模糊检索；
+ * 且一次查一批（气泡里可能同时有十几个词），避免一个词发一次请求。
+ *
+ * 键一律小写；调用方负责把 key 归一化成词库里的写法（空格 ↔ 下划线，库里两种都存在）。
+ * 查不到就是查不到：**不猜、不机翻**，返回的 map 里没有该键，前端照常只显示英文。
+ */
+export function lookupBooruZh(names: string[], limit = 300): Record<string, string> {
+  const db = open();
+  if (!db) return {};
+  const keys: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of names) {
+    const k = String(raw ?? "").trim().toLowerCase();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    keys.push(k);
+    if (keys.length >= limit) break;
+  }
+  if (!keys.length) return {};
+
+  const out: Record<string, string> = {};
+  try {
+    // 分批 IN 查询（SQLite 变量上限远大于 100，分批只是留余量）
+    for (let i = 0; i < keys.length; i += 100) {
+      const chunk = keys.slice(i, i + 100);
+      const ph = chunk.map(() => "?").join(",");
+      const rows = db
+        .prepare(`SELECT LOWER(tag) AS k, zh FROM booru WHERE LOWER(tag) IN (${ph})`)
+        .all(...chunk) as { k: string; zh: string | null }[];
+      for (const r of rows) {
+        if (r.zh) out[r.k] = r.zh;
+      }
+    }
+    return out;
+  } catch (e) {
+    // 出错必须留日志：静默返回 {} 会让「查不到中文」和「查询坏了」长得一模一样
+    console.warn("[taglib] 中文精确查询失败:", e instanceof Error ? e.message : e);
+    return {};
+  }
+}
+
 /** 词库统计（健康检查 / 调试用） */
 export function tagLibraryStats(): { ready: boolean; categories: number; groups: number; tags: number; booru: number } | null {
   const db = open();

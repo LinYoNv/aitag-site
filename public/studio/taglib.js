@@ -214,22 +214,111 @@
     renderPicked();
   }
 
+  // ===== 已选词的中文对照 =====
+  // 两级来源：①当前词库（精选库，自带 zh）②服务端 booru 精确查（查不到就是查不到，不机翻）。
+  // 词库里 `multiple_girls` 与 `multiple girls` 两种写法都存在，所以索引与查询都做双向归一化。
+  var zhMap = {}; // 归一化 key(小写) → 中文
+  var zhAsked = {}; // 已问过服务端的 key（含查不到的），避免反复发请求
+  var zhVersion = 0; // 中文表版本号：变了就让气泡重建 DOM
+
+  // 把用户写的词条归一化成词库里的 tag 名：剥掉权重与画师语法
+  // （`{1.4::artist:foo::}` → `foo`、`(masterpiece:1.2)` → `masterpiece`），
+  // 再给出「空格版 / 下划线版」两个候选键。
+  function zhKeysOf(name) {
+    var base = String(name == null ? "" : name).trim();
+    base = base.replace(/^[{[]+/, "").replace(/[}\]]+$/, "").trim();
+    base = base.replace(/^-?[\d.]+::/, "").replace(/::$/, "").trim();
+    base = base.replace(/^\(+/, "").replace(/\)+$/, "").trim();
+    base = base.replace(/:\s*-?[\d.]+$/, "").trim();
+    base = base.replace(/^artist:/, "").trim();
+    if (!base) return [];
+    var lower = base.toLowerCase();
+    var out = [lower];
+    if (lower.indexOf(" ") >= 0) out.push(lower.replace(/\s+/g, "_"));
+    if (lower.indexOf("_") >= 0) out.push(lower.replace(/_+/g, " "));
+    return out;
+  }
+
+  function zhFor(name) {
+    var keys = zhKeysOf(name);
+    for (var i = 0; i < keys.length; i++) {
+      if (zhMap[keys[i]]) return zhMap[keys[i]];
+    }
+    return "";
+  }
+
+  // 词库（重新）载入后重建索引。注意 zhAsked 要清空：换库后原本查不到的词可能有了。
+  function buildZhIndex() {
+    zhMap = {};
+    var cats = state.lib && state.lib.categories ? state.lib.categories : [];
+    cats.forEach(function (c) {
+      (c.groups || []).forEach(function (g) {
+        (g.tags || []).forEach(function (t) {
+          if (!t || !t.zh) return;
+          zhKeysOf(t.name).forEach(function (k) {
+            if (!zhMap[k]) zhMap[k] = String(t.zh);
+          });
+        });
+      });
+    });
+    zhAsked = {};
+    zhVersion++;
+  }
+
+  // 精选库覆盖不到的词（用户手打、画师串等）再问一次服务端 booru 表。
+  // **查不到不是故障**：气泡照常只显示英文；请求失败要留日志，别静默。
+  function ensureZh(tags) {
+    var missing = [];
+    tags.forEach(function (name) {
+      zhKeysOf(name).forEach(function (k) {
+        if (zhMap[k] || zhAsked[k]) return;
+        zhAsked[k] = 1;
+        missing.push(k);
+      });
+    });
+    if (!missing.length) return;
+    fetch(LIB_API_URL + "?zh=" + encodeURIComponent(missing.slice(0, 300).join(",")), { cache: "no-store" })
+      .then(function (r) {
+        return r.ok ? r.json() : null;
+      })
+      .then(function (j) {
+        var map = j && j.ok !== false && j.zh ? j.zh : {};
+        var hit = 0;
+        Object.keys(map).forEach(function (k) {
+          if (map[k] && !zhMap[k]) {
+            zhMap[k] = String(map[k]);
+            hit++;
+          }
+        });
+        if (!hit) return;
+        zhVersion++; // 版本号变了 → renderPicked 会重建气泡
+        renderPicked();
+      })
+      .catch(function (e) {
+        console.warn("[taglib] 中文对照查询失败（气泡照常显示英文）:", e && e.message ? e.message : e);
+      });
+  }
+
   // 已选提示词气泡：把正向提示词拆成一个个小框（位置对齐 WeiLin 面板的同一区块），
   // 每个框点 ✕ 单独删掉，不用回文本域里手工找词。空的时候整条隐藏，不给界面添噪音。
+  // 每个词后面带中文对照（如 `1girl 1女孩`）：中文来自词库，查不到就只显示英文。
   function renderPicked() {
     if (!dom.picked || !dom.pickedChips) return;
     var tags = parseTags(readTarget());
     dom.picked.classList.toggle("is-empty", tags.length === 0);
     if (dom.pickedCount) dom.pickedCount.textContent = tags.length ? tags.length + " 个词" : "";
     // 词没变就不重建 DOM：否则每次敲键盘都会把滚动位置和焦点重置掉
-    var sig = tags.join("\u0001");
+    // （中文表版本号要一起进签名，否则异步查回来的对照永远不显示）
+    var sig = tags.join("\u0001") + "\u0002" + zhVersion;
     if (sig === pickedSig) return;
     pickedSig = sig;
     dom.pickedChips.innerHTML = "";
     tags.forEach(function (name, idx) {
+      var zh = zhFor(name);
       var chip = el("span", "tl-pick");
-      chip.title = name;
+      chip.title = zh ? name + " · " + zh : name;
       chip.appendChild(el("span", "tl-pick-txt", name));
+      if (zh) chip.appendChild(el("span", "tl-pick-zh", zh));
       var x = el("button", "tl-pick-x", "✕");
       x.type = "button";
       x.title = "从提示词中移除 " + name;
@@ -239,6 +328,7 @@
       chip.appendChild(x);
       dom.pickedChips.appendChild(chip);
     });
+    ensureZh(tags);
   }
 
   // ===== DOM 构建 =====
@@ -270,7 +360,7 @@
     head.appendChild(idx);
     var titleWrap = el("div", "tl-head-title");
     titleWrap.appendChild(document.createTextNode("提示词组 // TAG LIBRARY"));
-    titleWrap.appendChild(el("small", null, "单击标签写入提示词 · 上方小框可单独移除已选词"));
+    titleWrap.appendChild(el("small", null, "单击标签写入提示词 · 小框带中文对照，✕ 单独移除已选词"));
     head.appendChild(titleWrap);
     head.appendChild(el("div", "tl-head-spacer"));
     var btnClose = el("button", "tl-close", "关闭");
@@ -973,6 +1063,8 @@
     var done = function (base) {
       state.base = base;
       state.lib = mergeLibrary(state.base, state.custom);
+      // 已选词的中文对照索引随词库一起重建（否则气泡上的对照会停留在上一个库）
+      buildZhIndex();
       // 词库来源署名（base.note 由服务端填：含上游项目与 GPL-3.0 说明）
       if (dom.libNote) {
         var note = base && base.note ? String(base.note) : "";

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { parsePngMetadata, parseComfyUi, extractArtistsFromPrompt } from "@/lib/png";
 import type { PngParseResult, ArtistTag } from "@/lib/types";
@@ -41,6 +41,8 @@ interface FileEntry {
   parsed: boolean;
   hasComfy: boolean; // 该图读到了 comfyui 参数
   hasNai: boolean; // 该图读到了 novelai 参数
+  // 由生图台「⇧ 上传」带过来的图（与手动选图区分：提示词可能来自生图记录而非 PNG 元数据）
+  fromStudio?: boolean;
 }
 
 const empty = (): Omit<FileEntry, "file" | "url" | "parseResult"> => ({
@@ -120,6 +122,9 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(
     null,
   );
+  // 从生图台「⇧ 上传」带图过来时的取图进度（null = 没有这次导入）
+  const [importing, setImporting] = useState<{ total: number; done: number } | null>(null);
+  const studioImportRef = useRef(false);
 
   const aiType = tab === "nai" ? "nai" : tab === "comfyui" ? "comfyui" : "other";
 
@@ -133,7 +138,12 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
     setResult(null);
   };
 
-  async function handleFiles(fileList: FileList | File[]) {
+  async function handleFiles(
+    fileList: FileList | File[],
+    // 生图台带过来的图：id → 当时的提示词。PNG 元数据缺失时用它兜底，
+    // 否则从生图记录带过来的图会变成"有图没词"，等于白带。
+    studioHints?: Record<string, { prompt: string; negative: string }>,
+  ) {
     const files = Array.from(fileList);
     if (files.length === 0) return;
 
@@ -146,6 +156,10 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
         parseResult: null,
         ...base,
       };
+      // 文件名由 importStudioHistory 生成：studio-<16位hex id>.<ext>
+      const idMatch = /^studio-([0-9a-f]{16})\./.exec(file.name);
+      const hint = studioHints && idMatch ? studioHints[idMatch[1]] : undefined;
+      if (hint) entry.fromStudio = true;
       if (file.type === "image/png") {
         try {
           const buf = await file.arrayBuffer();
@@ -188,10 +202,103 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
         }
       }
 
+      // 生图记录里的提示词兜底：只在 PNG 没解析出对应字段时填，绝不覆盖已解析出来的值
+      if (hint) {
+        if (!entry.prompt && hint.prompt) entry.prompt = hint.prompt;
+        if (!entry.negative && hint.negative) entry.negative = hint.negative;
+      }
+
       newEntries.push(entry);
     }
     setEntries((prev) => [...prev, ...newEntries]);
     setResult(null);
+  }
+
+  // ===== 从生图台「⇧ 上传」带图过来 =====
+  // 生图记录里的图存在服务端 data/uploads/hist/（不在 public），浏览器拿不到直链，
+  // 所以 URL 里只带记录 id，这里按 id 走鉴权接口取**原图**（不是缩略图），
+  // 再交给 handleFiles —— 与"手动选图"走**同一条**解析/预览/可编辑路径。
+  useEffect(() => {
+    // StrictMode 下 effect 会跑两次：同一次进页面只能导入一次，否则图片翻倍
+    if (studioImportRef.current) return;
+    studioImportRef.current = true;
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("from") !== "studio") return;
+    const ids = (params.get("ids") || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!ids.length) return;
+
+    // 先抹掉地址栏参数：不然刷新（或从历史里退回）会再导一次
+    window.history.replaceState({}, "", "/upload");
+    void importStudioHistory(ids);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function importStudioHistory(ids: string[]) {
+    setImporting({ total: ids.length, done: 0 });
+
+    // 顺带取一次生图记录：PNG 元数据缺失时用记录里的提示词兜底（否则会是"有图没词"）
+    const hints: Record<string, { prompt: string; negative: string }> = {};
+    try {
+      const res = await fetch("/api/studio/history", { credentials: "same-origin" });
+      if (res.ok) {
+        const data = (await res.json()) as {
+          items?: Array<{ id: string; prompt?: string; negative?: string }>;
+        };
+        for (const it of data.items ?? []) {
+          hints[it.id] = { prompt: it.prompt ?? "", negative: it.negative ?? "" };
+        }
+      } else {
+        console.warn("[upload] 生图记录提示词兜底读取失败 HTTP", res.status);
+      }
+    } catch (e) {
+      console.warn("[upload] 生图记录提示词兜底读取失败:", e);
+    }
+
+    const files: File[] = [];
+    const failed: string[] = [];
+    let needLogin = false;
+    for (const id of ids) {
+      try {
+        const res = await fetch(`/api/studio/history/${encodeURIComponent(id)}`, {
+          credentials: "same-origin",
+        });
+        if (!res.ok) {
+          if (res.status === 401) needLogin = true;
+          failed.push(`#${id.slice(0, 4)}（HTTP ${res.status}）`);
+        } else {
+          const blob = await res.blob();
+          const mime = blob.type || res.headers.get("content-type") || "image/png";
+          const ext = mime.includes("jpeg") ? "jpg" : mime.includes("webp") ? "webp" : "png";
+          files.push(new File([blob], `studio-${id}.${ext}`, { type: mime }));
+        }
+      } catch (e) {
+        failed.push(`#${id.slice(0, 4)}（${e instanceof Error ? e.message : "网络错误"}）`);
+      }
+      setImporting({ total: ids.length, done: files.length + failed.length });
+    }
+
+    if (files.length) await handleFiles(files, hints);
+    setImporting(null);
+
+    // 失败必须点名（静默少几张 = 用户以为"生图记录里的图丢了"）。注意 handleFiles 里
+    // 会 setResult(null)，所以提示一律放在它**之后**。
+    if (failed.length) {
+      setResult({
+        ok: false,
+        msg: needLogin
+          ? `登录已过期，${failed.length} 张没能带过来，请重新登录后再试`
+          : `有 ${failed.length} 张没能带过来：${failed.join("、")}`,
+      });
+    } else if (files.length) {
+      setResult({
+        ok: true,
+        msg: `已从生图记录带入 ${files.length} 张，确认参数后提交即可`,
+      });
+    }
   }
 
   function removeEntry(index: number) {
@@ -375,10 +482,24 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
                       <span className="text-xs font-medium text-[#e6edf3]">
                         图片 {i + 1}
                       </span>
+                      {entry.fromStudio && (
+                        <span
+                          className="text-[11px] px-1.5 py-0.5 rounded bg-[#1a2233] text-[#4c9fff] border border-[#2a3a55]"
+                          title="由生图台「⇧ 上传」带入的图"
+                        >
+                          ⇧ 生图记录
+                        </span>
+                      )}
                       {entry.parseResult ? (
                         entry.parsed ? (
                           <span className="text-[11px] px-1.5 py-0.5 rounded bg-[#14241a] text-[#7aff9a] border border-[#2a4a2a]">
                             {hasAuto ? "✓ 已解析" : "✓ 已读（无此类型参数）"}
+                          </span>
+                        ) : entry.fromStudio ? (
+                          // 带过来的图 PNG 里没有参数：提示词已用生图记录兜底，
+                          // 这里不能报「失败」——那会让用户以为这张图坏了
+                          <span className="text-[11px] px-1.5 py-0.5 rounded bg-[#1b1b1b] text-[#aeb6c2] border border-[#333]">
+                            参数取自生图记录
                           </span>
                         ) : (
                           <span className="text-[11px] px-1.5 py-0.5 rounded bg-[#2a1a1a] text-[#ff7a7a] border border-[#5a2a2a]">
@@ -386,9 +507,11 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
                           </span>
                         )
                       ) : (
-                        <span className="text-[11px] px-1.5 py-0.5 rounded bg-[#1a2233] text-[#4c9fff] border border-[#2a3a55]">
-                          手动参数
-                        </span>
+                        !entry.fromStudio && (
+                          <span className="text-[11px] px-1.5 py-0.5 rounded bg-[#1a2233] text-[#4c9fff] border border-[#2a3a55]">
+                            手动参数
+                          </span>
+                        )
                       )}
                       <button
                         onClick={() => removeEntry(i)}
@@ -586,6 +709,13 @@ export default function UploadPageClient({ user }: { user: UserInfo }) {
 
       <main className="max-w-3xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
         <h1 className="text-lg sm:text-xl font-bold text-[#e6edf3] mb-4 sm:mb-5">上传作品</h1>
+
+        {/* 从生图台带图过来的取图进度（图在服务端，得按 id 一张张取） */}
+        {importing && (
+          <div className="mb-4 rounded-xl border border-[#2a3a55] bg-[#101722] px-4 py-3 text-sm text-[#4c9fff]">
+            正在从「生图记录」取图… {importing.done}/{importing.total}
+          </div>
+        )}
 
         {/* 三种上传方式卡片 */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">

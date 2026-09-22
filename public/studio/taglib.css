@@ -443,6 +443,21 @@
   white-space: nowrap;
   max-width: 24ch;
 }
+/* 已选词的中文对照（如 `1girl 1女孩`）：比英文淡一档，用正文字体（等宽字体显示中文很难看） */
+.tl-pick-zh {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 14ch;
+  padding-left: 5px;
+  margin-left: -1px;
+  border-left: 1px solid var(--tl-line);
+  font-family: inherit;
+  font-size: 0.72rem;
+  color: var(--tl-ink-faint);
+}
 .tl-pick-x {
   flex: 0 0 auto;
   width: 17px;

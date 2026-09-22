@@ -87,7 +87,7 @@
     historyEmpty: $("historyEmpty"),
     historyCount: $("historyCount"),
     historyHint: $("historyHint"),
-    historyToggle: $("historyToggle"),
+    historyUpload: $("historyUpload"),
     historyClear: $("historyClear"),
   };
 
@@ -1203,14 +1203,13 @@
   }
 
   // =========================================================================
-  // ===== 生图历史（服务端保留最近 20 条，面板默认展示最近 4 张缩略图） =====
+  // ===== 生图历史（服务端保留最近 20 条，面板全部展示：每行 4 张） =====
   // =========================================================================
-  // 默认展示张数与保留上限**由接口下发**（口径唯一定义在 src/lib/studio-presets.ts）。
-  // 这里是兜底默认值，仅在接口没给 preview 时使用，别把它当权威值。
-  let HISTORY_PREVIEW_COUNT = 4;
+  // 保留上限**由接口下发**（口径唯一定义在 src/lib/studio-presets.ts），这里是兜底默认值。
   let HISTORY_LIMIT = 20;
   let historyItems = [];
-  let historyExpanded = false;
+  // 勾选待上传的记录 id（跨重渲染保留；记录被删/清空时必须剪枝，否则会带着幽灵 id 跳上传页）
+  const historySelected = new Set();
   // 读失败的原因：必须一路带到 renderHistory，否则提示会被后面的正常渲染覆盖，
   // 用户看到的就是「空列表」——故障与"确实没有历史"长得一模一样。
   let historyError = "";
@@ -1220,7 +1219,6 @@
     try {
       const resp = await apiGet("/api/studio/history");
       historyItems = Array.isArray(resp && resp.items) ? resp.items : [];
-      if (resp && Number(resp.preview) > 0) HISTORY_PREVIEW_COUNT = Number(resp.preview);
       if (resp && Number(resp.limit) > 0) HISTORY_LIMIT = Number(resp.limit);
       historyError = "";
     } catch (e) {
@@ -1237,11 +1235,12 @@
 
   function renderHistory() {
     if (!els.historyGrid) return;
+    pruneHistorySelection();
     const total = historyItems.length;
-    const shown = historyExpanded ? total : Math.min(HISTORY_PREVIEW_COUNT, total);
 
+    // 全部展示（服务端已按 20 条裁剪）：不再有「展开/收起」，也就没有"隐藏的图"被误删的风险
     els.historyGrid.innerHTML = "";
-    historyItems.slice(0, shown).forEach(function (item, idx) {
+    historyItems.forEach(function (item, idx) {
       els.historyGrid.appendChild(buildHistoryItem(item, idx));
     });
 
@@ -1254,36 +1253,108 @@
       setBadge(els.historyCount, total === 0 ? "— 无记录" : total + " 条记录", "badge-neutral");
     }
 
-    // 超过 4 条才需要「展开全部」
-    if (els.historyToggle) {
-      if (total > HISTORY_PREVIEW_COUNT) {
-        els.historyToggle.textContent = historyExpanded
-          ? "收起（只显示 " + HISTORY_PREVIEW_COUNT + " 张）"
-          : "展开全部（" + total + " 条）";
-        show(els.historyToggle);
-      } else {
-        hide(els.historyToggle);
-      }
-    }
-
     if (els.historyHint) {
       els.historyHint.textContent = historyError
         ? "历史读取失败：" + historyError
-        : total > HISTORY_PREVIEW_COUNT && !historyExpanded
-          ? "仅本人可见 · 已显示最近 " + shown + " / " + total + " 条"
-          : "仅本人可见 · 服务端保留最近 " + HISTORY_LIMIT + " 条";
+        : "仅本人可见 · 保留最近 " + HISTORY_LIMIT + " 条 · 勾选缩略图可批量上传";
     }
+
+    syncHistoryUploadButton();
+  }
+
+  // 记录被删/被裁掉后，勾选集合里可能残留已不存在的 id → 一律剪掉，
+  // 否则「上传」按钮会显示一个永远传不出去的张数（用户拿到的是"少了几张"的黑盒）。
+  function pruneHistorySelection() {
+    if (!historySelected.size) return;
+    const alive = new Set(
+      historyItems.map(function (x) {
+        return x.id;
+      }),
+    );
+    Array.from(historySelected).forEach(function (id) {
+      if (!alive.has(id)) historySelected.delete(id);
+    });
+  }
+
+  // 「⇧ 上传」按钮状态：没勾选 → 禁用（灰）；勾了 → 变信号黄 + 带张数，明显到不可能看不见
+  function syncHistoryUploadButton() {
+    const btn = els.historyUpload;
+    if (!btn) return;
+    const n = historySelected.size;
+    btn.disabled = n === 0;
+    btn.classList.toggle("is-armed", n > 0);
+    btn.textContent = n > 0 ? "⇧ 上传（" + n + "）" : "⇧ 上传";
+    btn.title = n > 0 ? "把勾选的 " + n + " 张图带到上传页（到那边还能再挑一次）" : "勾选下方缩略图后可批量上传";
+  }
+
+  function toggleHistorySelect(id, on) {
+    if (on) historySelected.add(id);
+    else historySelected.delete(id);
+    // 只改这几处的 class，不整块重渲染：重建 DOM 会让刚点的复选框失焦、缩略图重播入场动画
+    const item = els.historyGrid
+      ? els.historyGrid.querySelector('[data-history-id="' + id + '"]')
+      : null;
+    if (item) {
+      item.classList.toggle("is-selected", on);
+      const cb = item.querySelector(".history-item-check");
+      if (cb) cb.classList.toggle("is-checked", on);
+    }
+    syncHistoryUploadButton();
+  }
+
+  // 带勾选的图去上传页：URL 里只带 id，图由上传页按 id 现取原图
+  // （历史图在 data/ 下、不在 public，浏览器直接 <img>/<a> 拿不到，必须走鉴权接口）
+  function uploadSelectedHistory() {
+    const ids = historyItems
+      .filter(function (x) {
+        return historySelected.has(x.id);
+      })
+      .map(function (x) {
+        return x.id;
+      });
+    if (!ids.length) return studioToast("先勾选要上传的图");
+    const url = "/upload?from=studio&ids=" + encodeURIComponent(ids.join(","));
+    // 面板挂在 /studio 的 iframe 里：要跳的是**整个页面**，
+    // 否则上传页会被塞进 iframe，地址栏还是 /studio，用户会以为"跳转失败"
+    try {
+      if (window.top && window.top !== window) {
+        window.top.location.href = url;
+        return;
+      }
+    } catch (e) {
+      console.warn("[aitag Studio] 无法跳转顶层窗口（跨域？），改为当前窗口跳转:", e);
+    }
+    window.location.href = url;
   }
 
   function buildHistoryItem(item, idx) {
+    const selected = historySelected.has(item.id);
     const wrap = document.createElement("div");
-    wrap.className = "history-item";
+    wrap.className = "history-item" + (selected ? " is-selected" : "");
+    wrap.dataset.historyId = item.id;
     wrap.title = (item.prompt || "（无提示词）") + "\n" + new Date(item.create_date).toLocaleString();
 
     const index = document.createElement("span");
     index.className = "history-item-index";
     index.textContent = "#" + (idx + 1);
     wrap.appendChild(index);
+
+    // 勾选框（右上角）：常显，触摸设备也能点到；勾选只影响"要不要上传"，不影响点图看大图
+    const check = document.createElement("label");
+    check.className = "history-item-check" + (selected ? " is-checked" : "");
+    check.title = "勾选后可批量带到上传页";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = selected;
+    cb.setAttribute("aria-label", "选择第 " + (idx + 1) + " 张生图记录");
+    cb.addEventListener("click", function (e) {
+      e.stopPropagation();
+    });
+    cb.addEventListener("change", function () {
+      toggleHistorySelect(item.id, cb.checked);
+    });
+    check.appendChild(cb);
+    wrap.appendChild(check);
 
     const img = document.createElement("img");
     // 缩略图走同一路由的 ?thumb=1（480px WebP），点开才加载原图
@@ -1356,6 +1427,7 @@
       historyItems = historyItems.filter(function (x) {
         return x.id !== item.id;
       });
+      historySelected.delete(item.id);
       renderHistory();
       studioToast("已删除该条历史");
     } catch (e) {
@@ -1381,7 +1453,7 @@
         throw new Error((data && data.error) || "HTTP " + resp.status);
       }
       historyItems = [];
-      historyExpanded = false;
+      historySelected.clear();
       renderHistory();
       studioToast("已清空 " + (data.deleted || 0) + " 条历史");
     } catch (e) {
@@ -1393,13 +1465,9 @@
 
   function initHistory() {
     if (!els.historyGrid) return;
-    if (els.historyToggle) {
-      els.historyToggle.addEventListener("click", function () {
-        historyExpanded = !historyExpanded;
-        renderHistory();
-      });
-    }
+    if (els.historyUpload) els.historyUpload.addEventListener("click", uploadSelectedHistory);
     if (els.historyClear) els.historyClear.addEventListener("click", clearHistory);
+    syncHistoryUploadButton();
     loadHistory();
   }
 

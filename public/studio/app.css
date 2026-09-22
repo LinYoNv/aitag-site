@@ -1577,7 +1577,8 @@ body::before {
 
 /* ==========================================================================
    ===== 生图历史 (RECENT OUTPUTS) =====
-   右侧结果卡下方的独立卡片：默认只显示最近 4 张缩略图，可展开看全部（最多 20 条）。
+   右侧结果卡下方的独立卡片：展示最近 20 张缩略图，**每行 4 张**（窄屏 3 张）。
+   每个缩略图左上角有勾选框，勾选后底部「⇧ 上传」变黄可点，带着选中的图跳上传页。
    ========================================================================== */
 .history-grid {
   display: grid;
@@ -1585,8 +1586,6 @@ body::before {
   gap: var(--space-2, 10px);
 }
 
-/* 收起态：只显示前 4 张；多出来的用 .hidden 交给 JS 控制，这里不做 nth-child 隐藏
-   （nth-child 隐藏会让"生图后前插新图"的 DOM 顺序变化时闪现错图） */
 .history-item {
   position: relative;
   aspect-ratio: 1 / 1;
@@ -1597,6 +1596,12 @@ body::before {
   cursor: pointer;
   transition: transform var(--trans-fast), border-color var(--trans-fast), box-shadow var(--trans-fast);
   animation: ef-fade-in 0.3s ease-out;
+}
+
+/* 勾选态：信号黄描边，一眼看出哪几张会被上传 */
+.history-item.is-selected {
+  border-color: var(--edge-signal-dark);
+  box-shadow: inset 0 0 0 2px var(--edge-signal), 0 4px 14px var(--edge-signal-glow);
 }
 
 .history-item:hover {
@@ -1630,6 +1635,49 @@ body::before {
   color: var(--edge-ink-primary);
   border: 1px solid var(--edge-ink-primary);
   line-height: 1.5;
+}
+
+/* 勾选框（右上角）：多选后可一键带到上传页。
+   **常显**——触摸设备没有 hover，藏起来手机上根本点不到；桌面也不该靠猜。 */
+.history-item-check {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 3;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-xs);
+  border: 1.5px solid var(--edge-ink-primary);
+  background: rgba(255, 255, 255, 0.86);
+  cursor: pointer;
+  transition: background var(--trans-fast), border-color var(--trans-fast), transform var(--trans-fast);
+}
+.history-item-check:hover { transform: scale(1.08); }
+.history-item-check input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+/* 勾选态用 CSS 画对勾：不依赖字形，避免缺字体时显示成方框 */
+.history-item-check.is-checked { background: var(--edge-signal); }
+.history-item-check.is-checked::after {
+  content: "";
+  position: absolute;
+  width: 5px;
+  height: 10px;
+  margin-top: -2px;
+  border: solid var(--edge-ink-primary);
+  border-width: 0 2.5px 2.5px 0;
+  transform: rotate(45deg);
 }
 
 /* 悬停操作条：下载 / 复用参数 / 删除 */
@@ -1711,6 +1759,37 @@ body::before {
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+/* 「⇧ 上传」按钮：默认禁用（灰、不可点）；
+   一旦勾选了图 → .is-armed 变信号黄 + 轻微呼吸光，明显到不可能看不见。
+   order 保证它排在「✕ 清空历史」**左边**，不依赖 HTML 顺序。 */
+.btn-chip.is-upload { order: -1; }
+.btn-chip.is-upload:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  border-style: dashed;
+}
+.btn-chip.is-upload:disabled:hover {
+  background: rgba(255, 255, 255, 0.8);
+  border-color: var(--edge-border-l2);
+  box-shadow: none;
+}
+.btn-chip.is-upload.is-armed {
+  background: var(--edge-signal);
+  border-color: var(--edge-ink-primary);
+  color: var(--edge-ink-primary);
+  box-shadow: 0 2px 10px var(--edge-signal-glow);
+  animation: ef-armed-glow 1.6s ease-in-out infinite;
+}
+.btn-chip.is-upload.is-armed:hover { background: var(--edge-signal-hover); }
+
+@keyframes ef-armed-glow {
+  0%, 100% { box-shadow: 0 2px 8px var(--edge-signal-glow); }
+  50% { box-shadow: 0 2px 16px var(--edge-signal-glow); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn-chip.is-upload.is-armed { animation: none; }
 }
 
 /* 窄屏：4 列改 3 列，避免缩略图小到看不清 */

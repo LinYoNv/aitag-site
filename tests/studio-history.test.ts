@@ -10,20 +10,14 @@ import test from "node:test";
 import {
   STUDIO_HISTORY_LIMIT,
   STUDIO_HISTORY_NEGATIVE_MAX,
-  STUDIO_HISTORY_PREVIEW,
   STUDIO_HISTORY_PROMPT_MAX,
   STUDIO_HISTORY_THUMB_WIDTH,
   isHistoryId,
   isSafeHistoryFilename,
 } from "../src/lib/studio-presets";
 
-test("历史保留 20 条、面板默认展示 4 张（产品口径）", () => {
+test("历史保留 20 条，且这 20 条**全部**在面板上展示（产品口径，2026-09-22 改）", () => {
   assert.equal(STUDIO_HISTORY_LIMIT, 20);
-  assert.equal(STUDIO_HISTORY_PREVIEW, 4);
-  assert.ok(
-    STUDIO_HISTORY_PREVIEW <= STUDIO_HISTORY_LIMIT,
-    "预览张数不能超过保留上限，否则永远显示不全",
-  );
 });
 
 test("缩略图规格与图库画廊同口径（480px WebP）", () => {

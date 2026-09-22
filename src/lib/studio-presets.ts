@@ -211,11 +211,14 @@ export const DEFAULT_DIRECTOR_CAPTION = "character&style";
 
 // ---- 生图历史（面板「生图历史」卡片 + /api/studio/history）----
 
-/** 每个用户保留的生图记录条数（超出后按时间从旧到新裁剪，图片文件一起删） */
+/**
+ * 每个用户保留的生图记录条数（超出后按时间从旧到新裁剪，图片文件一起删）。
+ *
+ * ⚠️ 这个数同时就是**面板展示口径**：接口按它取、面板全量渲染（每行 4 张）。
+ * 2026-09-22 之前面板只显示 4 张、其余折叠在「展开全部」后面（曾有 STUDIO_HISTORY_PREVIEW=4），
+ * 情绪要求"保留 20 张就展示 20 张"，折叠态已删除 —— 别再把它加回来。
+ */
 export const STUDIO_HISTORY_LIMIT = 20;
-
-/** 面板默认展示的缩略图张数（其余折叠在「展开全部」后面） */
-export const STUDIO_HISTORY_PREVIEW = 4;
 
 /** 历史图缩略图规格（与图库画廊同规格：480px WebP） */
 export const STUDIO_HISTORY_THUMB_WIDTH = 480;

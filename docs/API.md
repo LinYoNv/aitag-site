@@ -273,6 +273,9 @@ Query 参数：
 ```
 - `?q=<词>`：在 danbooru 中文表（2.2 万条带翻译）里补充检索，`{ "ok": true, "query": "...", "tags": [{ "name": "long_hair", "zh": "长发" }] }`；
   英文与中文都匹配（`LOWER(tag) LIKE` 或 `zh LIKE`），精确/前缀命中优先。
+- `?zh=<名1,名2,...>`：**批量精确查中文**（面板「已选提示词气泡」的中文对照用），
+  `{ "ok": true, "zh": { "long_hair": "长发" } }` —— 键为小写 tag 名，**查不到就不出现在 map 里**
+  （前端照常只显示英文，不猜不机翻）。一次最多 300 个；走 `booru` 表，与精选库是否导入无关。
 - **词库未同步**时不报错：`200 { "ok": false, "synced": false, "hint": "…" }`，面板据此回退到自带的 `tags.default.json`。
 - 响应带 `Cache-Control: private, max-age=300`（词库只在重新导入时变化）。
 
@@ -283,15 +286,17 @@ Query 参数：
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/studio/history` | `{ "ok": true, "items": [...], "limit": 20, "preview": 4 }` |
+| GET | `/api/studio/history` | `{ "ok": true, "items": [...], "limit": 20 }` |
 | DELETE | `/api/studio/history` | 清空当前用户全部历史（含磁盘图片）→ `{ "ok": true, "deleted": N }` |
 | DELETE | `/api/studio/history?id=<id>` | 删除单条 → `{ "ok": true, "deleted": 1 }`；不存在或非本人 → `404` |
 | GET | `/api/studio/history/[id]` | 取历史图（原图）；`?thumb=1` 取 480px WebP 缩略图 |
 
 - `items[]` 字段：`{ id, url, thumb_url, ext, backend, model, size, prompt, negative, create_date }`。
   `url`/`thumb_url` 都指向本接口（图片存 `data/uploads/hist/`，不在 `public/` 下）。
-- **保留 20 条**（`STUDIO_HISTORY_LIMIT`）：`POST /api/studio/generate` 成功后自动入库，
+- **保留 20 条且面板全量展示**（`STUDIO_HISTORY_LIMIT`）：`POST /api/studio/generate` 成功后自动入库，
   超出后从旧到新裁剪，**库记录与磁盘文件一起删**（避免孤儿文件无限堆积）。
+  ⚠️ 2026-09-22 起不再有「面板预览 4 张 / 展开全部」这回事（`preview` 字段已删）——
+  保留多少就展示多少，面板每行 4 张。
 - 图片响应带 `Cache-Control: private, no-cache` + `ETag`：`If-None-Match` 命中返 `304`。
   ⚠️ 这里**刻意不用 `max-age`** —— 实测长缓存会让浏览器在记录已删除后继续显示旧图（服务端已 404）。
 - 单条越权与不存在**都返回 404**（不区分，避免用 id 探测他人是否有该记录）。
@@ -324,7 +329,9 @@ Query 参数：
 
 | 日期 | 变更 | 影响 |
 |---|---|---|
-| 2026-09-21 | **生图台新增「生图历史」**：`GET/DELETE /api/studio/history` + `GET /api/studio/history/[id]`；生成成功后自动入库（每用户保留 20 条，超出裁剪并删文件）；面板结果卡下方新增历史卡片，默认展示最近 4 张缩略图、可展开全部 | 新增 `studio_history` 表与 `data/uploads/hist/`（原图 + 480px WebP 缩略图）；图片存文件、库里只存文件名，库不会膨胀；历史图**需登录且仅本人可见** |
+| 2026-09-22 | **生图历史改为全量展示 + 可勾选上传**：面板不再「默认 4 张 / 展开全部」，20 张一次列完（每行 4 张，窄屏 3 张）；每张加勾选框，底部新增「⇧ 上传」（勾选后变信号黄），点击跳到 `/upload?from=studio&ids=<id,id,…>` 由上传页按 id 取原图预填；`GET /api/studio/history` 去掉 `preview` 字段 | 上传页新增「从生图记录带图」入口：取图失败/登录过期会**点名报错**，不会静默少几张；PNG 无元数据时用生图记录里的提示词兜底 |
+| 2026-09-22 | `GET /api/studio/tags` 新增 `?zh=a,b,c` 批量精确查中文（面板已选词气泡的中文对照） | 只读补充，不影响 `?q=` 与分类树；查不到不返回该键 |
+| 2026-09-21 | **生图台新增「生图历史」**：`GET/DELETE /api/studio/history` + `GET /api/studio/history/[id]`；生成成功后自动入库（每用户保留 20 条，超出裁剪并删文件）；面板结果卡下方新增历史卡片 | 新增 `studio_history` 表与 `data/uploads/hist/`（原图 + 480px WebP 缩略图）；图片存文件、库里只存文件名，库不会膨胀；历史图**需登录且仅本人可见** |
 | 2026-09-21 | **游客可只读浏览**：画廊 `/api/works`、详情 `/api/works/[id]` 不再要求登录；生图台/上传/个人资料仍 307 跳登录；游客点赞收藏与删除仍 401。游客无账号偏好，**强制套用 R18G 推荐默认屏蔽组** | 匿名访客能看到画廊（默认屏蔽重口内容）；`/api/works` 从「需登录」变成公开接口，别再用它做鉴权探针 |
 | 2026-09-18 | 新增 `POST /api/me/nickname`（修改昵称）：昵称即作品作者名，改名与「同步本人全部作品作者名」在同一事务内完成；昵称不得与他人用户名或昵称重复，系统保留名与泛用作者名（群友/匿名/游客/guest）禁用 | 上传接口的作者名从「登录用户名」改为「账号昵称」（未设昵称行为不变）；`/u/[handle]` 支持用昵称访问；删除权限判定改为昵称或用户名任一命中 |
 | 2026-09-14 | 新增 `GET /api/studio/tags`：面板词库改为服务端 WeiLin 中文词库（11 分类 / 132 分组 / 4086 标签，另有 2.2 万条 danbooru 中文可检索）；未同步时面板自动回退自带起始库 | 标签管理从「起始库」变成真实词库；`data/taglib.db` 不进仓库，由部署脚本单独同步 |

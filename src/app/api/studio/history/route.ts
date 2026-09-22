@@ -12,7 +12,6 @@ import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/auth";
 import { STUDIO_HISTORY_LIMIT, clearStudioHistory, deleteStudioHistory } from "@/lib/db";
 import { getStudioHistory, removeHistoryFiles } from "@/lib/studio-history";
-import { STUDIO_HISTORY_PREVIEW } from "@/lib/studio-presets";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -23,13 +22,13 @@ export async function GET() {
     return NextResponse.json({ error: "未登录" }, { status: 401 });
   }
   const items = getStudioHistory(user.id, STUDIO_HISTORY_LIMIT);
-  // limit / preview 一并下发：口径唯一定义在 studio-presets.ts，
+  // limit 一并下发：口径唯一定义在 studio-presets.ts，
   // 面板是静态 JS（import 不了 TS），只能由接口把常量带给它，避免两边各写一份魔数。
+  // （面板按 limit 全量展示 —— 没有"折叠/展开"这回事了）
   return NextResponse.json({
     ok: true,
     items,
     limit: STUDIO_HISTORY_LIMIT,
-    preview: STUDIO_HISTORY_PREVIEW,
   });
 }
 
