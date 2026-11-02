@@ -337,7 +337,7 @@ systemctl reload <反代服务>    # 改反代配置后重载
 | `test-parser.mjs` | ComfyUI 解析器冒烟测试：临时编译 `src/lib/png.ts` 后跑样例 workflow 断言 |
 | `warmup-images.mjs` | 图片缓存预热：扫描 DB 全部作品，预生成 thumb/preview 缓存（部署后跑一次；`--only-list` 只列 URL） |
 | `taglib-import.mjs` | 中文词库同步：把 WeiLin 词库（GPL-3.0）转成 `data/taglib.db` 供 `/api/studio/tags` 读取；`--download` 拉源库、`--emit-json` 另存 JSON。**产物不进 git**（`data/` 已忽略），部署脚本会单独拷到线上 |
-| `deploy-hk3.sh` | 生产部署：拉代码 → build → 同步 standalone/public/**词库 DB** → 重启 → 健康检查 |
+| `deploy.sh` | 生产部署：拉代码 → build → 同步 standalone/public/**词库 DB** → 重启 → 健康检查（生产机为 jp-vps 64.81.114.30；保留 deploy-hk3.sh 兼容入口） |
 
 ### 测试（`tests/`）
 | 文件 | 用途 |
@@ -389,7 +389,7 @@ systemctl reload <反代服务>    # 改反代配置后重载
     - **已选词中文对照（2026-09-22）**：气泡里每个词后面跟一条淡色中文（`1girl 1女孩`）。两级来源：先查当前词库（精选库自带 `zh`，**精选库优先**——`solo` 显示「单人」而不是 booru 的「单独人物」），查不到再问 `?zh=`（booru 精确匹配）。**查不到就不显示**，绝不机翻；用户写的是任意文本（`{1.4::artist:foo::}`、`(long_hair:1.2)`），所以查之前要归一化：先剥权重/画师语法，再按「空格版 / 下划线版」两个候选键查（词库里 `multiple_girls` 与 `multiple girls` 两种写法都存在）。中文表变化用 `zhVersion` 进渲染签名，否则异步查回来的对照永远不显示。
     - **产物来源**：`scripts/taglib-import.mjs` 从 WeiLin-Comfyui-Tools-panel 的中文词库（`userdatas_zh_CN.db`）同步。上游为 **GPL-3.0**，因此：**派生数据一律放 `data/`（已 gitignore），绝不进公开仓库**；面板底部署名出处。
     - **健壮性要点**：① 源库 `tag_subgroups` 存在 `name` 为 NULL 的脏行（会撞目标表 `NOT NULL`，曾让整个导入以 `SQLITE_CONSTRAINT_NOTNULL(1299)` 失败）——无名字且无标签的空组跳过、有标签的用占位名保留，两者都打印出来；② danbooru 表 14 万行里只有 2.2 万行带中文，只导有翻译的（产物从 ~9MB 降到 1.5MB）；③ **词库未同步不报错**：接口返回 `ok:false, synced:false`，面板回退到自带起始库并提示，功能不中断。
-    - **部署**：`data/taglib.db` 不在 git 里，`scripts/deploy-hk3.sh` 会**单独原子拷**到线上 `data/`（只碰这一个文件，绝不覆盖同目录的 `aitag.db` / `studio.secret`），并在健康检查里校验。
+    - **部署**：`data/taglib.db` 不在 git 里，`scripts/deploy.sh` 会**单独原子拷**到线上 `data/`（只碰这一个文件，绝不覆盖同目录的 `aitag.db` / `studio.secret`），并在健康检查里校验。
 30. **精准参考（director）只支持 4.5 系（2026-09-14，实测）**：上游中转对 `director_reference_*` 的请求，**5 系模型会报 500**（`novelai adaptor: precise reference is only supported by NAI 4.5 models`），与官方文档「4.5/5 全系」不符。`DIRECTOR_MODELS` 白名单因此**只放行 4.5 系**，其余模型一律回退 `nai-diffusion-4-5-full` 并打日志（回退必须留痕，否则线上排查只能靠猜）。面板提示文案已同步更正。
 31. **参考模式与逐图强度（2026-09-14）**：`vibe`（氛围转移，默认强度 0.6，`information_extracted` 0.7）只迁移氛围/风格，**不保证人物一致性**；`director`（精准参考，默认强度 1.0、`base_caption` `character&style`）才保人物/服装。面板切换模式时会按新模式默认值刷新逐图强度，但**用户手改过的值保留**（判据：值仍等于上次自动套用值 `autoStrength` 即视为未定制）。生图请求日志已补 `参考图字节` / `强度[]` / `描述[]`，便于与 AstrBot 的 `ref_bytes` 口径对照。
 32. **昵称修改（2026-09-18）**：昵称就是 `users.author_name`，也是作品展示的作者名（`works.author_name`）。作品归属没有 user_id 外键，全靠作者名**字符串匹配**，所以改名功能必须配三件事，缺一个都会出事：

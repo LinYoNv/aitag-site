@@ -68,11 +68,11 @@ npm test           # PNG 解析器单元测试（node:test + tsx）
 
 ## 部署（Linux 生产机）
 
-生产机上一键部署（推荐，内含构建 → 同步产物 → 重启 → 健康检查）：
+生产机上一键部署（推荐，当前生产机为 jp-vps，内含构建 → 同步产物 → 重启 → 健康检查）：
 
 ```bash
-cd <源码目录> && bash scripts/deploy-hk3.sh        # 拉取 main 并部署
-SKIP_PULL=1 bash scripts/deploy-hk3.sh             # 用当前工作区代码部署
+cd <源码目录> && bash scripts/deploy.sh            # 拉取 main 并部署
+SKIP_PULL=1 bash scripts/deploy.sh                 # 用当前工作区代码部署
 ```
 
 脚本会处理 standalone 部署的几个坑：**node_modules 整目录拷贝**（增量拷会破坏 sharp 等原生模块）、
